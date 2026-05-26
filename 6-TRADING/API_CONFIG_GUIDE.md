@@ -97,7 +97,23 @@ export OKX_SECRET_KEY="your_okx_secret_key"
 export OKX_PASSPHRASE="your_passphrase"
 ```
 
-**方式3: Bridge API**
+**方式3: `~/.okx/config.toml` (推荐，支持 live/sim 多账户)**
+```toml
+# ~/.okx/config.toml
+[live]
+api_key    = "your_live_api_key"
+secret_key = "your_live_secret_key"
+passphrase = "your_passphrase"
+
+[sim]
+api_key    = "your_sim_api_key"
+secret_key = "your_sim_secret_key"
+passphrase = "your_passphrase"
+```
+使用 `--profile sim` 切换模拟盘，`--profile live` 切换实盘（默认 live）。
+`dream_stop_loss_monitor.py` v1.1 起支持此方式。
+
+**方式4: Bridge API**
 ```bash
 curl -X POST http://127.0.0.1:3847/api/config/okx \
   -H "Content-Type: application/json" \
@@ -198,8 +214,7 @@ source ~/.bash_profile_trading
 echo $TAVILY_API_KEY
 echo $OKX_API_KEY
 
-# 验证OKX连接
-cd /Users/zhangjiangtao/WorkBuddy/dreambuddy-v1/6-TRADING
+# 验证OKX连接（在 6-TRADING 目录下）
 python scripts/okx_cli.py --profile paper ticker BTC-USDT-SWAP
 ```
 
