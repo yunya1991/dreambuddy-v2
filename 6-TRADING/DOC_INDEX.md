@@ -1,7 +1,7 @@
 # 6-TRADING 文档索引
 
-> **版本**: v2.0
-> **日期**: 2026-05-16
+> **版本**: v2.1
+> **日期**: 2026-05-27
 > **定位**: 项目文档总入口，四大文档体系导航
 
 ---
@@ -19,12 +19,13 @@
 
 ## 一、交易系统SKILL
 
-### 1.1 核心交易SKILL (23个)
+### 1.1 核心交易SKILL (24个)
 
 | SKILL | A系 | 路径 | 职责 |
 |:------|:----|:-----|:-----|
 | dream-systematic-trading | - | `skills/dream-systematic-trading/` | **三屏交易总入口SKILL** |
 | dream-screen3-third | - | `skills/dream-screen3-third/` | **第三屏实时执行层（A7→A4→GateC→A5→A6→A9）** |
+| dream-doc-sync-gate | - | `skills/dream-doc-sync-gate/` | **文档同步门禁（PR提交/合并前检查文档一致性）** |
 | dream-contradiction-theory | A0 | `skills/dream-contradiction-theory/` | 矛盾分析（矛盾论+孙子兵法+战争论） |
 | dream-strategy-research | A1 | `skills/dream-strategy-research/` | 深度调研（Tavily+OKX+链上） |
 | dream-first-principles | A2 | `skills/dream-first-principles/` | 第一性原理（阻力最小+趋势延续） |
@@ -70,7 +71,8 @@
 | 文档 | 路径 | 版本 | 说明 |
 |:-----|:-----|:-----|:-----|
 | **Claude Code 协作方案** | `docs/CLAUDE_CODE_COLLAB_PLAN.md` | v1.0 | ★ Team A/B 分工+CronCreate+Session归档+代码化路线 |
-| **工作流规范** | `docs/TRADING_WORKFLOW_SPEC_v1.md` | v1.0 | 三屏策略流程+邮箱体系+自动化任务（待审核） |
+| **工作流规范** | `docs/TRADING_WORKFLOW_SPEC_v1.md` | v1.1 | 三屏策略流程+Sessions产物体系+自动化任务（待审核） |
+| **产物存储规范** | `docs/ARTIFACT_STORAGE_GUIDE.md` | v1.0 | ★ Sessions目录方案+产物分类+ACTIVE_SESSION索引 |
 | **交易系统设计** | `TRADING_SYSTEM.md` | v2.2 | A0-A9完整设计+三屏执行+马丁策略 |
 | **A系详解** | `A_SERIES_DETAIL.md` | v1.0 | A0-A9各模块职责说明 |
 | **架构设计** | `docs/ARCHITECTURE_DESIGN_v2.0.md` | v2.0 | DreamBuddy系统架构（120KB） |
@@ -97,7 +99,7 @@
 │   ├── dream_strategy_pipeline.py  # 策略流水线
 │   ├── okx_cli.py / okx_unified_toolkit.py  # OKX工具
 │   └── a*_*.py               # A系列脚本
-├── skills/                    # 项目级SKILL（23个）
+├── skills/                    # 项目级SKILL（24个）
 ├── sessions/                  # ★ 交易会话归档
 │   ├── README.md              # 命名规范：{YYYYMMDD}-{SYMBOL}-{TRIGGER}/
 │   └── _template/             # 会话目录模板（meta.json + team-a/b/ + gate-c/ + review/）
@@ -108,7 +110,7 @@
 ├── reports/                   # 回测报告
 │   ├── backtest_result_v2.json    # 200U回测结果
 │   └── backtest_v2_10k.json       # 10kU回测结果
-├── docs/                      # 架构与规范文档（11个）
+├── docs/                      # 架构与规范文档（12个）
 ├── automation/                # 自动化脚本
 ├── config/                    # 配置文件
 │   └── strategy_library.yaml  # 策略库（v2.2）
@@ -142,7 +144,7 @@
 | `GET /api/skill/*` | `api/skill_router_api.py` | SKILL路由 |
 | `WS /ws/*` | `api/websocket_manager.py` | WebSocket连接 |
 
-### 3.4 自动化任务（4个）
+### 3.4 自动化任务（5个）
 
 | 任务 | ID | 频率 | 说明 |
 |:-----|:---|:-----|:-----|
@@ -150,19 +152,23 @@
 | 第二屏-日线预设 | TBD（待 CronCreate 注册） | 每工作日 07:30 | 日线预设+三大预设价位表 |
 | Team B 状态检查 | TBD（待 CronCreate 注册） | 每工作日 09:00 | 持仓监控/入场执行 |
 | Process D 复盘 | TBD（待 CronCreate 注册） | 每周一 06:00 | A8 复盘+改进提案 |
-| 6-TRADING邮箱扫描器 | `automation-1778908569973` | 每小时 | 扫描A4/A5/A6/A9产物 |
 | 交易工作流监控 | `automation-1778908570394` | 每4h | 监控自动化运行状态 |
 
-### 3.5 6-TRADING邮箱体系
+### 3.5 产物存储体系（Sessions 方案）
+
+> 旧邮箱方案 `~/.workbuddy/boss-secretary/` 已废弃。产物统一存入 `sessions/`，详见 **`docs/ARTIFACT_STORAGE_GUIDE.md`**。
 
 ```
-~/.workbuddy/skills/boss-secretary/reports/trading/6-trading/
-├── screen1/          # 第一屏产物
-├── screen2/          # 第二屏产物
-├── signals/          # A4/A5/A6/A9信号
-├── orders/           # 订单记录
-├── execution_log/    # 执行日志
-└── .scanner_state.json  # 扫描器状态
+sessions/
+├── ACTIVE_SESSION.json        # ★ 当前活跃会话指针
+├── SESSION_INDEX.json         # 历史会话索引
+├── _template/                 # 会话目录模板
+│   ├── meta.json
+│   ├── team-a/                # 研究产物（Screen1/Screen2）
+│   ├── team-b/                # 执行产物（A4/A5/A6/A9）
+│   ├── gate-c/                # 门禁产物
+│   └── review/                # 复盘产物（A8）
+└── {YYYYMMDD}-{SYMBOL}-{TRIGGER}/   # 每次交易会话
 ```
 
 ---
