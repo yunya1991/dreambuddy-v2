@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """
-回测策略实现模块 v4.0
+回测策略实现模块 v5.0
 ======================
 忠实实现 TRADING_WORKFLOW_SPEC_v1.md 设计规范
+
+v5.0 熊市门禁 (A+B方案):
+  1. detect_market_regime() EMA50缺失时改用 price vs EMA20 (B: 解除50周数据依赖)
+  2. Screen1 熊市入场门禁: regime=WEAK_BEAR/STRONG_BEAR → direction=WAIT, 拒绝新LONG (A)
+  3. 移除失效的 EMA50×0.95 强制做空覆盖 (EMA50在27周数据内不可靠)
 
 v4.0 市场状态增强 (v2改进):
   1. Screen1 熊市强制覆盖: 周线收盘低于EMA50×0.95 → 强制空头
@@ -210,34 +215,49 @@ def detect_market_regime(
     atr_val   = curr.get("atr") or 0
     close_val = curr.get("close") or 1
 
-    if not ema20 or not ema50:
+    # --- 主路径: EMA20+EMA50 均可用 ---
+    if ema20 and ema50:
+        ema_diff_pct = (ema20 - ema50) / ema50 * 100  # 正=多, 负=空
+
+        if ema_diff_pct < -3.0:
+            return "STRONG_BEAR", 1.0
+
+        macd_growing = (curr_hist is not None and prev_hist is not None
+                        and curr_hist > 0 and curr_hist > prev_hist)
+        rsi_ok = rsi is not None and 50 <= rsi <= 75
+        if ema_diff_pct > 3.0 and macd_growing and rsi_ok:
+            return "STRONG_BULL", 1.0
+
+        if abs(ema_diff_pct) < 0.5:
+            atr_ratio = atr_val / close_val if close_val > 0 else 0
+            if atr_ratio < 0.02:
+                return "CONSOLIDATION", 0.5
+
+        if ema_diff_pct < 0 or (curr_hist is not None and curr_hist < 0):
+            return "WEAK_BEAR", 0.75
+
+        return "WEAK_BULL", 0.75
+
+    # --- B: 价格动量 fallback (EMA 数据不足时, 如周线窗口<50根) ---
+    # 用4周涨跌幅 + 连续下跌判断趋势，无需EMA，最少需要4根周线
+    if weekly_idx < 4:
         return "CONSOLIDATION", 0.5
 
-    ema_diff_pct = (ema20 - ema50) / ema50 * 100  # 正=多, 负=空
+    c4w = weekly_candles[weekly_idx - 4]["close"]
+    c2w = weekly_candles[weekly_idx - 2]["close"] if weekly_idx >= 2 else close_val
+    c1w = weekly_candles[weekly_idx - 1]["close"]
+    chg4w = (close_val - c4w) / c4w * 100 if c4w > 0 else 0.0
+    consec_down = close_val < c1w and c1w < c2w
 
-    # STRONG_BEAR: EMA20 < EMA50 超3%, 或收盘低于 EMA50×0.95
-    if ema_diff_pct < -3.0 or close_val < ema50 * 0.95:
+    if chg4w < -20 or (chg4w < -10 and consec_down):
         return "STRONG_BEAR", 1.0
-
-    # STRONG_BULL: EMA20>EMA50 超3% + MACD hist>0 且增长 + RSI 50-75
-    macd_growing = (curr_hist is not None and prev_hist is not None
-                    and curr_hist > 0 and curr_hist > prev_hist)
-    rsi_ok = rsi is not None and 50 <= rsi <= 75
-    if ema_diff_pct > 3.0 and macd_growing and rsi_ok:
-        return "STRONG_BULL", 1.0
-
-    # CONSOLIDATION: |diff| <0.5% + ATR/close <2% (波动率压缩)
-    if abs(ema_diff_pct) < 0.5:
-        atr_ratio = atr_val / close_val if close_val > 0 else 0
-        if atr_ratio < 0.02:
-            return "CONSOLIDATION", 0.5
-
-    # WEAK_BEAR: EMA20<EMA50 (0-3%), 或 MACD hist<0
-    if ema_diff_pct < 0 or (curr_hist is not None and curr_hist < 0):
+    if chg4w < -8 or (chg4w < -4 and consec_down):
         return "WEAK_BEAR", 0.75
-
-    # WEAK_BULL: EMA20>EMA50 (0-3%), 或混合信号
-    return "WEAK_BULL", 0.75
+    if chg4w > 20:
+        return "STRONG_BULL", 1.0
+    if chg4w > 8:
+        return "WEAK_BULL", 0.75
+    return "CONSOLIDATION", 0.5
 
 
 # ==================== 第一屏: 周线决策 ====================
@@ -336,14 +356,8 @@ def run_screen1(
 
     score = max(0, min(100, score))
 
-    # 方向判断 (v4.0: 熊市强制覆盖 + 评分分支)
-    ema50_val = curr.get("ema50")
-    if ema50_val and curr["close"] < ema50_val * 0.95:
-        # Hard override: 周价低于EMA50超5% → 强制空头 (不受评分影响)
-        direction = Direction.SHORT
-        market_state = "强制空头(EMA50跌破5%)"
-        position_limit = 0.60
-    elif score <= short_threshold:
+    # 方向判断 (v5.0: 评分分支 + 熊市门禁, 移除失效的EMA50绝对跌破覆盖)
+    if score <= short_threshold:
         direction = Direction.SHORT
         market_state = "空头"
         position_limit = 0.60
@@ -356,10 +370,16 @@ def run_screen1(
         market_state = "弱多头"
         position_limit = 0.40
     else:
-        # score > short_threshold && < weak_threshold: 观望 = 弱多头 LONG
         direction = Direction.LONG
         market_state = "观望"
         position_limit = 0.20
+
+    # A: 熊市入场门禁 — regime 为熊市时拒绝新 LONG 开仓
+    # 仅阻止新开仓; 已持仓由 check_exit_signals 正常管理
+    if direction == Direction.LONG and regime in ("WEAK_BEAR", "STRONG_BEAR"):
+        direction = Direction.WAIT
+        market_state = f"暂停入场({regime})"
+        position_limit = 0.0
 
     # 策略类型: 基于波动率
     atr_val = curr.get("atr") or 0
