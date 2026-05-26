@@ -6,6 +6,7 @@
 > **同步关系**: 本文档 → Claude Code 本地 `memory/reference_trading_cron_jobs.md`（单向从此同步）
 > **v1.3 变更**: 新增 Governance 层（G2 合规/G3 自动修复/G4 升级路由/CC 成本守卫）；Process D 新增 Step 0C/1.5b/1.5c/4.5/4.6；完整提案生命周期闭环（含 R0-R3 分级落地矩阵）
 > **v1.4 变更**: 正式绑定 tavily SKILL（4-GENERIC）为 Phase-0 搜索原语；标注 basic/advanced/news/general 模式；新增权威域名白名单注释
+> **v1.5 变更**: 压力测试修复（10个缺口）：screen1_session_id 写入记忆、Screen2 漂移恢复机制、sleepwalk 提前触发机制、A9 EXIT 调用 B9+C4、PARALLEL_INCOMPLETE C4、A8/OE 并行 race condition、martingale 参数分隔标记
 
 ---
 
@@ -54,6 +55,8 @@ P0.9: [dream-knowledge K1 检索] 查询 knowledge/strategy_scores/ 中最近 5 
        → 非 HARD BLOCK：K1 无记录时继续执行
 P0.8: 合并以上数据为 data_context（含 historical_analogues + knowledge_context），所有后续 Agent 必须以此作为分析基础
 ⛔ 若 P0.1-P0.6 任意步骤失败（Tavily 无结果），输出 SCREEN1_BLOCKED，等待人工干预
+   → 写入记忆 screen1_blocked_reason: "P0.{N}_TAVILY_NO_RESULT"（N=失败步骤编号）
+   → 写入记忆 screen1_session_id: null（本次 Screen1 未完成）
    → [dream-operation-director] 自动触发 SOP-2 升级记录
 
 [Phase-1 分析执行]
@@ -78,7 +81,11 @@ P0.8: 合并以上数据为 data_context（含 historical_analogues + knowledge_
 6. C4 产物归档（artifact-alignment-manager）：
    - strategy-type.json / weekly-direction.md / master-debate.json
    - raw/a1-contradiction.md / a2-first-principles.md / a3-simulation.md
-7. 更新记忆中的 screen1_direction 状态（含 btc_price_basis/data_source/adjusted screen1_score/master_debate_result）
+7. 更新记忆中的 screen1_direction 状态：
+   - screen1_direction / btc_price_basis / data_source / adjusted screen1_score / master_debate_result
+   - **screen1_session_id**: 本次 session 文件夹路径（如 "20260526-BTC-SCREEN1"）← 供 Team B Gate C / A5 确定性定位使用
+   - screen1_valid_until: 有效期（默认 7 天）
+   - screen1_blocked_reason: 若被 SCREEN1_BLOCKED 则写入原因，否则 null
 ```
 
 ---
@@ -96,7 +103,10 @@ P0.8: 合并以上数据为 data_context（含 historical_analogues + knowledge_
 [Phase-0 数据采集与漂移检查]
 P0.1: [tavily TX basic/news] 搜索获取当前 BTC 价格（域白名单: coindesk.com, coingecko.com）
 P0.2: 与记忆中 screen1_btc_price_basis 比对
-  - 偏差 > 10%：自动触发 Screen1 重跑，当前 Screen2 暂停
+  - 偏差 > 10%：[内联触发 Screen1] 在当前 Screen2 session 内直接执行 Screen1 全流程
+     → Screen1 完成、记忆更新后，**立即自动继续** Screen2 Phase-0 P0.1 重新采集价格并继续
+     → 若 Screen1 被 BLOCKED → Screen2 同步终止，不再重试（本日无预设）
+     → 写入 Screen2 frontmatter: price_drift_triggered_screen1=true
   - 偏差 5-10%：继续执行，在输出中标注 PRICE_DRIFT_WARNING
   - 偏差 < 5%：正常执行
 P0.3: 验证 Screen1 有效期（valid_until 字段），已过期则先触发 Screen1
@@ -104,7 +114,13 @@ P0.3: 验证 Screen1 有效期（valid_until 字段），已过期则先触发 S
 [Phase-1 日线分析]
 1. 创建 sessions/{YYYYMMDD}-BTC-SCREEN2/ 文件夹
 2. 并行执行 A1(日线矛盾)/A2(日线第一性原理)/A3(日线沙盘)，注入 Phase-0 数据
-3. 计算马丁阶梯（3情景：S1基准/S2Squeeze/S3反转），生成初始 daily-presets.json
+3. 计算马丁阶梯参数（auto-repair G3 可自动更新下方标记段内的数值）：
+<!-- MARTINGALE_PARAMS_START -->
+   - S1基准: L0仓位=30%, TP=+3%, SL=-4%, 间距=1.5%
+   - S2Squeeze: L0仓位=20%, TP=+5%, SL=-3%, 间距=2%
+   - S3反转: L0仓位=25%, TP=+8%, SL=-5%, 间距=3%
+<!-- MARTINGALE_PARAMS_END -->
+   生成初始 daily-presets.json
 
 [Phase-2 回测验证与参数优化]（非 HARD BLOCK，失败则降级输出 Phase-1 结果）
 4. [dream-data-analysis 趋势上下文] 读取 review/data-analysis-report.json（如存在）：
@@ -146,7 +162,10 @@ P0.3: 验证 Screen1 有效期（valid_until 字段），已过期则先触发 S
    Step0: dream-strategy-parser (Regime路由) → 输出 directive_bias
    → dream-signal-scoring-spec (8维评分) + dream-risk-position-sizing + dream-execution-cost-model [并行]
      ⚠️ 三者必须全部完成才能继续，任意一个失败 → PARALLEL_INPUT_INCOMPLETE → 写 SKIP episode 终止
-     → PARALLEL_INPUT_INCOMPLETE 时: [dream-operation-director] SOP-2 记录故障 SKILL
+     → PARALLEL_INPUT_INCOMPLETE 时:
+       ① [dream-operation-director] SOP-2 记录故障 SKILL（含 SKILL ID + 错误摘要）
+       ② [learning-episode-writer B9] 写 SKIP episode（reason: PARALLEL_INPUT_INCOMPLETE）
+       ③ [artifact-alignment-manager C4] 归档本次 episode.json（确保记录不丢失）
    → A7-practice-theory (实践门禁)
    → dream-pretrade-gatekeeper (Gate C)：
      [IA-GC ACH验证] 在最终裁决前执行竞争性假设分析：
@@ -173,8 +192,17 @@ P0.3: 验证 Screen1 有效期（valid_until 字段），已过期则先触发 S
    → artifact-alignment-manager (C4): 产物归档
      归档: a7-gate.json / gate-c/pretrade-check.json / team-b/episode.json / execution-log.md
 3. 如 status=holding → dream-intelligence-monitor (A6) 监控 + dream-exit-skill-v2 (A9) 止盈止损检查
-   A9 离场后 → artifact-alignment-manager (C4) 归档离场相关产物
+   A9 离场完成后执行以下步骤（顺序）：
+   ① [learning-episode-writer B9] 写 EXIT episode（action: EXIT_TP | EXIT_SL | EXIT_FORCED）
+      → 填写 outcome: exit_price / pnl_usdt / pnl_pct / max_drawdown_pct / holding_hours / exit_reason
+      → consecutive_skip_count 重置为 0
+   ② [artifact-alignment-manager C4] 归档离场相关产物
+      归档: exit-log.md / episode.json（含 outcome）/ team-b/a9-exit.json
 4. 连续 SKIP ≥7 次 → sleepwalk_alert=true → 写入记忆文件，触发提前 Process D
+   [提前触发机制]: B9 写入 sleepwalk_alert=true 后，立即在当前 Screen3 session 内
+   **内联执行 Process D 触发提示词全流程**（不等待周一 CronCreate）
+   → Process D 完成后，memory.sleepwalk_alert 重置为 false
+   → 写入 episode.json: sleepwalk_early_review_triggered=true
 ```
 
 ---
@@ -188,8 +216,9 @@ Step 0 [并行 — A8 + OE + PR 三路]:
   A) [A8-theory-practice-verification] 知行合一批评：
      - 读取上周所有 sessions/*/review/ 和 sessions/*/team-b/episode.json
      - [IA-PD] 偏见审计：确认偏见/群体思维/过度自信三项检查
-     - 参考 oneirology-report.json 的 compulsive_skip_analysis 补充 bias_audit
      - 输出: review/a8-reflection.json（含 retrospective_score, key_findings, bias_audit）
+     ⚠️ Step 0 并行约束：A8 不得在 Step0 内读取 OE 输出（OE 同时运行未完成）
+        → A8 在 Step 1.5a 完成后，通过 Step 1.5d [可选] 补充 OE 的 compulsive_skip_analysis 到 bias_audit
   B) [dream-oneirology] 弗洛伊德梦分析（无 Gate 权力，纯顾问）：
      - 输入: sessions/*/team-b/episode.json (last 7 days)
      - 检测四大模块: 强迫性重复 / 维度凝缩 / 被压制判断 / 叙事二次修正
@@ -216,6 +245,7 @@ Step 1.5b [CC 成本归因]（与 DA 并行）:
   - D级 SKILL → 触发 dream-performance-review 重点评估标记
 
 Step 1.5c [RE Token 效率监控]（DA + CC 完成后）:
+
   [resource-efficiency-analyst] Token 消耗分析（四条铁律严格执行）：
   - 仅读取本次 Process D 产出的最新 1 份报告
   - 无变化则输出"今日数据无异常变化"（≤50字）
@@ -301,6 +331,7 @@ Step 6 [记忆更新]:
 | v1.2 | 2026-05-26 | 集成 5 个 2-INTELLIGENCE SKILL：IA 偏见注入 / ACH矩阵 / master-seminar / archive-center P0.4b / OE / DA |
 | v1.3 | 2026-05-27 | 集成 6 个 3-SUPPORT SKILL：CC Tavily 预算守卫 / AR 账户隔离 / Process D Step 0C/1.5b/1.5c/4.5/4.6 完整提案闭环 |
 | v1.4 | 2026-05-27 | 正式绑定 tavily 4-GENERIC SKILL 为 Phase-0 搜索原语；标注 basic/advanced/news/general 模式和权威域名白名单 |
+| v1.5 | 2026-05-27 | 压力测试修复：screen1_session_id/blocked_reason 写入记忆；Screen2 漂移内联恢复；sleepwalk 内联 ProcessD；A9 EXIT B9+C4；PARALLEL_INCOMPLETE B9+C4；Step 1.5d A8+OE merge；martingale 参数分隔标记 |
 
 ---
 
