@@ -30,8 +30,8 @@ from backtest_strategy import (
     Direction, SignalStrength, StrategyType, ExitReason,
     Screen1Output, Screen2Output, Position, Trade,
     run_screen1, run_screen2, check_exit_signals,
-    calc_martin_add_on, recalc_avg_entry, calc_partial_close,
-    TP_RATIOS,
+    calc_martin_add_on, recalc_avg_entry,
+    DEFAULT_STRATEGY_PARAMS,
 )
 
 
@@ -139,13 +139,11 @@ class BacktestEngine:
         self.position = Position(
             direction=screen1.direction,
             entry_price=price,
-            initial_size_usd=size_usd,   # 记录初始大小 (用于等额加仓)
+            initial_size_usd=size_usd,
             size_usd=size_usd,
             level=0,
             add_on_levels=screen2.add_on_levels,
-            tp_levels=screen2.tp_levels,
-            tp_hit=[False, False, False],  # 三层止盈均未触发
-            stop_loss_price=screen2.stop_loss_price,
+            tp_target=screen2.tp_target,
             highest_equity=self.equity,
             entry_date=dt.strftime("%Y-%m-%d"),
             signal_strength=screen2.signal_strength,
@@ -169,13 +167,15 @@ class BacktestEngine:
         self.trades.append(trade)
         self.stats["signal_trades"][screen2.signal_strength.value] += 1
 
-    def _add_position(self, add_price: float, add_size: float, candle: Dict):
-        """等额加仓 (规范)"""
+    def _add_position(self, add_price: float, add_size: float, candle: Dict,
+                      vol_mult: float = 1.0, tp_pct: float = 4.0):
+        """等额加仓 (v8.0: TP随均价滚动更新)"""
         price = self._apply_slippage(add_price, self.position.direction, is_buy=True)
         fee = self._calc_fee(add_size)
 
         self.cash -= (add_size + fee)
-        recalc_avg_entry(self.position, price, add_size, self.cfg["taker_fee"])
+        recalc_avg_entry(self.position, price, add_size, self.cfg["taker_fee"],
+                         vol_mult=vol_mult, tp_pct=tp_pct)
         self.position.total_cost += fee
 
         dt = ts_to_dt(candle["ts"])
@@ -194,83 +194,8 @@ class BacktestEngine:
         self.trades.append(trade)
         self.stats["add_on_count"] += 1
 
-        # 记录马丁是否完成
         if self.position.is_martin_complete:
-            print(f"   {'[马丁加满]' if self.position.direction == Direction.LONG else '[马丁加满]'} "
-                  f"Level {self.position.level}/3, 启用三层止盈")
-
-    def _partial_close_position(self, candle: Dict, exit_reason: ExitReason, tp_level: int, price: float = None):
-        """
-        分批止盈平仓 (规范: 30%/30%/40%)
-
-        tp_level: 0=第一档(30%), 1=第二档(30%), 2=第三档(40%)
-        """
-        if self.position.direction == Direction.WAIT:
-            return
-
-        close_price = price or candle["close"]
-        close_price = self._apply_slippage(close_price, self.position.direction, is_buy=False)
-
-        # 计算本次平仓数量
-        close_size = calc_partial_close(self.position, tp_level)
-        fee = self._calc_fee(close_size)
-
-        # 计算本次盈亏
-        if self.position.direction == Direction.LONG:
-            pnl = (close_price - self.position.entry_price) / self.position.entry_price * close_size - fee
-        else:
-            pnl = (self.position.entry_price - close_price) / self.position.entry_price * close_size - fee
-
-        # 更新持仓
-        self.position.size_usd -= close_size
-        self.cash += close_size + pnl - fee
-        self.position.tp_hit[tp_level] = True
-
-        dt = ts_to_dt(candle["ts"])
-        trade = Trade(
-            trade_id=self._next_trade_id(),
-            timestamp=candle["ts"],
-            date=dt.strftime("%Y-%m-%d"),
-            action="partial_close",
-            direction=self.position.direction,
-            price=close_price,
-            size_usd=close_size,
-            fee=fee,
-            signal_strength=self.position.signal_strength,
-            screen1_direction=self.position.screen1.direction if self.position.screen1 else Direction.WAIT,
-            exit_reason=exit_reason,
-            pnl=round(pnl, 2),
-            pnl_pct=round(pnl / (close_size + fee) * 100, 2) if close_size > 0 else 0,
-            equity_at_close=round(self.cash + self.position.size_usd, 2),
-        )
-        self.trades.append(trade)
-        self.stats["partial_close_count"] += 1
-        self.stats["tp{}_count".format(tp_level + 1)] += 1
-
-        # 检查是否全部平仓 (第三档止盈或剩余仓位极小)
-        if self.position.size_usd < 5 or tp_level == 2:
-            # 记录统计
-            self.stats["total_trades"] += 1
-            if pnl > 0:
-                self.stats["win_trades"] += 1
-                if self.position.signal_strength:
-                    self.stats["signal_wins"][self.position.signal_strength.value] += 1
-            else:
-                self.stats["loss_trades"] += 1
-
-            if self.position.screen1:
-                self.stats["screen1_total"] += 1
-                if self.position.screen1.direction == self.position.direction and pnl > 0:
-                    self.stats["screen1_correct"] += 1
-
-            # 保存马丁完成统计
-            if self.position.is_martin_complete:
-                self.stats["martin_complete_trades"] += 1
-            else:
-                self.stats["martin_incomplete_trades"] += 1
-
-            self.position = Position()
-            self.equity = self.cash
+            print(f"   [马丁加满] Level {self.position.level}/3 | TP目标=${self.position.tp_target:,.0f}")
 
     def _is_in_cooldown(self, current_date_str: str) -> bool:
         """检查是否在止损冷却期内"""
@@ -318,6 +243,8 @@ class BacktestEngine:
         if exit_reason == ExitReason.DRAWDOWN_LIMIT:
             self.stats["forced_close_count"] += 1
             self.stats["drawdown_limit_count"] += 1
+        if exit_reason == ExitReason.TAKE_PROFIT_1:
+            self.stats["tp1_count"] += 1
 
         # 第一屏正确率
         if self.position.screen1:
@@ -440,9 +367,9 @@ class BacktestEngine:
         print(f"   周线: {len(self.weekly_candles)} 根")
         print(f"   时间: {ts_to_dt(self.daily_candles[0]['ts']):%Y-%m-%d} ~ {ts_to_dt(self.daily_candles[-1]['ts']):%Y-%m-%d}")
         print(f"   初始资金: ${self.cfg['initial_capital']:,.2f}")
-        print(f"   止损: 固定20% (硬性约束)")
-        print(f"   加仓: 等额, 最多3次, 总仓位60%上限")
-        print(f"   止盈: 三层(2x/3x/5x ATR), 仅马丁加满后启用")
+        print(f"   止损: 无固定SL (仅信号反转/20%回撤强制全平)")
+        print(f"   加仓: 等额, 每跌8%×vol_mult, 最多3次, 信号评分≥50")
+        print(f"   止盈: 单次全仓, 均价+4%×vol_mult")
 
         print(f"\n开始回测...")
         warmup = 50
@@ -469,7 +396,7 @@ class BacktestEngine:
                     print(f"   {dt:%Y-%m-%d} 开仓: {screen1.direction.value} ({screen1.market_state}) "
                           f"| 信号={screen2.signal_score:.0f}({screen2.signal_strength.value}) "
                           f"| 价位=${price:,.0f} | 单层仓位={screen2.position_pct*100:.1f}% "
-                          f"| 止损=${screen2.stop_loss_price:,.0f}")
+                          f"| TP=${screen2.tp_target:,.0f}")
             else:
                 # 持仓中: 检查A9四层离场
                 should_exit, exit_reason, tp_level = check_exit_signals(
@@ -479,41 +406,45 @@ class BacktestEngine:
                 )
 
                 if should_exit:
-                    if tp_level >= 0:
-                        # 分批止盈
-                        self._partial_close_position(candle, exit_reason, tp_level)
-                        print(f"   {dt:%Y-%m-%d} 分批止盈(TP{tp_level+1}): 平仓{TP_RATIOS[tp_level]*100:.0f}% "
-                              f"| 剩余={self.position.size_usd:.1f}U")
+                    # v8.0: 全部为全仓平仓
+                    if exit_reason == ExitReason.TAKE_PROFIT_1:
+                        close_price = self.position.tp_target
+                    elif exit_reason == ExitReason.STOP_LOSS:
+                        close_price = getattr(self.position, "stop_loss_price", price)
                     else:
-                        # 全仓平仓
-                        if exit_reason == ExitReason.STOP_LOSS:
-                            close_price = self.position.stop_loss_price
-                        else:
-                            close_price = price
-                        print(f"   {dt:%Y-%m-%d} 全平: {exit_reason.value} "
-                              f"| Level={self.position.level}/3 {'[马丁完成]' if self.position.is_martin_complete else ''} "
-                              f"| 价格=${close_price:,.0f}")
-                        self._close_position(candle, exit_reason, close_price)
+                        close_price = price
+                    martin_tag = "[马丁加满]" if self.position.is_martin_complete else ""
+                    print(f"   {dt:%Y-%m-%d} 全平: {exit_reason.value} {martin_tag} "
+                          f"| Level={self.position.level}/3 | 价格=${close_price:,.0f}")
+                    self._close_position(candle, exit_reason, close_price)
 
-                        if exit_reason == ExitReason.DRAWDOWN_LIMIT:
-                            print(f"   最大回撤触发, 强制全平!")
-                            break
+                    if exit_reason == ExitReason.DRAWDOWN_LIMIT:
+                        print(f"   最大回撤触发, 强制全平!")
+                        break
                 else:
-                    # 检查加仓 (v7.0 Opt-2: RSI+ATR扩张时跳过)
+                    # 检查加仓 (v7.0 Opt-2: RSI+ATR扩张时跳过; v8.0: 信号评分门禁)
                     if screen2.addon_suppressed:
                         add_info = None
                     else:
+                        addon_min_score = (self.opt_params or {}).get(
+                            "addon_min_score", DEFAULT_STRATEGY_PARAMS["addon_min_score"]
+                        )
                         add_info = calc_martin_add_on(
-                            self.position, candle, self.cash, self.equity, self.cfg["taker_fee"]
+                            self.position, candle, self.cash, self.equity, self.cfg["taker_fee"],
+                            min_score=addon_min_score, signal_score=screen2.signal_score,
                         )
                     if add_info:
                         add_price, add_size = add_info
-                        # 回撤警告时暂停加仓
                         dd = (self.peak_equity - self._current_equity(price)) / self.peak_equity * 100
                         if dd < self.cfg["warn_drawdown"]:
-                            self._add_position(add_price, add_size, candle)
+                            vol_mult = getattr(screen1, "vol_mult", 1.0)
+                            tp_pct = (self.opt_params or {}).get(
+                                "tp_pct", DEFAULT_STRATEGY_PARAMS["tp_pct"]
+                            )
+                            self._add_position(add_price, add_size, candle,
+                                               vol_mult=vol_mult, tp_pct=tp_pct)
                             print(f"   {dt:%Y-%m-%d} 加仓L{self.position.level}: "
-                                  f"${add_price:,.0f} x{add_size:.1f}U (等额)")
+                                  f"${add_price:,.0f} x{add_size:.1f}U | TP=${self.position.tp_target:,.0f}")
 
             # 记录权益
             self._record_equity(candle, price)
@@ -650,9 +581,9 @@ class BacktestEngine:
         print(f"   交易对:     {c['inst_id']}")
         print(f"   时间范围:   {c['start_date']} ~ {c['end_date']} ({result['backtest_days']}天)")
         print(f"   初始资金:   ${c['initial_capital']:,.2f}")
-        print(f"   止损:       固定20% (硬性约束)")
-        print(f"   加仓:       等额, 最多3次")
-        print(f"   止盈:       三层TP (2x/3x/5x ATR), 仅马丁加满后启用")
+        print(f"   止损:       无固定SL (信号反转/20%回撤强制全平)")
+        print(f"   加仓:       等额×vol_mult, 最多3次, 信号评分≥50")
+        print(f"   止盈:       单次全仓 (均价+4%×vol_mult)")
 
         print(f"\n性能指标:")
         print(f"   总收益率:   {result['total_return']:+.2f}%")
@@ -665,11 +596,8 @@ class BacktestEngine:
 
         print(f"\n马丁策略统计:")
         print(f"   马丁完成:   {result['martin_complete_trades']}次 (加满3层)")
-        print(f"   马丁未完成: {result['martin_incomplete_trades']}次 (被止损/信号反转)")
-        print(f"   分批止盈:   {result['partial_close_count']}次")
-        print(f"   TP1触发:    {result['tp1_count']}次 (平30%)")
-        print(f"   TP2触发:    {result['tp2_count']}次 (平30%)")
-        print(f"   TP3触发:    {result['tp3_count']}次 (平40%)")
+        print(f"   马丁未完成: {result['martin_incomplete_trades']}次 (信号反转/回撤)")
+        print(f"   TP触发:     {result['tp1_count']}次 (单次全仓止盈)")
 
         print(f"\n风险控制:")
         print(f"   止损出场:   (含在总交易中)")
