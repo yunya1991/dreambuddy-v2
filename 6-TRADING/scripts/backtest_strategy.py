@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """
-回测策略实现模块 v5.0
+回测策略实现模块 v6.0
 ======================
 忠实实现 TRADING_WORKFLOW_SPEC_v1.md 设计规范
+
+v6.0 Option C — 双向马丁 (bidirectional martingale):
+  1. STRONG_BEAR regime → 强制做空 (direction=SHORT, 仓位60%)
+  2. WEAK_BEAR regime → 继续观望 (direction=WAIT, 拒绝LONG)
+  3. SHORT马丁底层全部就绪: 加仓触发high>=target, SL=均价×1.20, TP=均价-ATR×mult
 
 v5.0 熊市门禁 (A+B方案):
   1. detect_market_regime() EMA50缺失时改用 price vs EMA20 (B: 解除50周数据依赖)
@@ -374,12 +379,19 @@ def run_screen1(
         market_state = "观望"
         position_limit = 0.20
 
-    # A: 熊市入场门禁 — regime 为熊市时拒绝新 LONG 开仓
-    # 仅阻止新开仓; 已持仓由 check_exit_signals 正常管理
-    if direction == Direction.LONG and regime in ("WEAK_BEAR", "STRONG_BEAR"):
-        direction = Direction.WAIT
-        market_state = f"暂停入场({regime})"
-        position_limit = 0.0
+    # v6.0 Option C: 双向马丁 — 按 regime 决定 LONG/SHORT/WAIT
+    # 仅影响新开仓; 已持仓由 check_exit_signals 正常管理
+    if direction == Direction.LONG:
+        if regime == "STRONG_BEAR":
+            # 强熊市: 反转做空 (4w跌幅>20% 或 >10%+连续下跌)
+            direction = Direction.SHORT
+            market_state = "强制空头(STRONG_BEAR)"
+            position_limit = 0.60
+        elif regime == "WEAK_BEAR":
+            # 弱熊市: 观望, 不冒险
+            direction = Direction.WAIT
+            market_state = "暂停入场(WEAK_BEAR)"
+            position_limit = 0.0
 
     # 策略类型: 基于波动率
     atr_val = curr.get("atr") or 0
