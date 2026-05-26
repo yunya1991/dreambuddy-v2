@@ -1,8 +1,9 @@
-# 6-TRADING SKILL Registry v1.0
+# 6-TRADING SKILL Registry v1.1
 
-> **版本**: v1.0 | **更新日期**: 2026-05-26
+> **版本**: v1.1 | **更新日期**: 2026-05-26
 > **管理原则**: 所有执行均须符合治理基础层（dream-constitution v2.9）约束。
 > **来源说明**: 1-TRADE / 0-CORE = dream-multiskill-v2 | 6-TRADING = 本仓库
+> **v1.1 变更**: G1-G6 缺口修复 — 新增 dream-backtest/bayesian-opt (G1)；B3/B4/B5 并行合约 (G2)；phase7_contingency 生产合约 (G3)；Screen1 触发时间 Sunday 20:00 确认 (G6)
 
 ---
 
@@ -21,6 +22,8 @@ graph TD
         A5[A2: dream-first-principles]
         A6[A3: dream-strategy-designer]
         A7[dream-regime-detector]
+        A8s["Phase-2: dream-backtest"]
+        A9s["Phase-2: dream-bayesian-opt"]
     end
     subgraph TB["Team B — 入场执行"]
         B1[Screen 3: dream-screen3-third]
@@ -28,7 +31,8 @@ graph TD
         B3[dream-signal-scoring-spec]
         B4[dream-risk-position-sizing]
         B5[dream-execution-cost-model]
-        B6[Gate C: dream-pretrade-gatekeeper]
+        AGG{{"AGGREGATE gate_inputs"}}
+        B6["Gate C: dream-pretrade-gatekeeper"]
         B7[A4: dream-tactical-validator]
         B8[A5: dream-tactical-executor]
         B9["NEW: learning-episode-writer"]
@@ -58,8 +62,15 @@ graph TD
     A3 & A4 & A5 & A6 -.->|内嵌| A1
     A3 & A4 & A5 -.->|内嵌| A2
     A7 -.->|Regime触发| A1
+    A2 -->|Phase-2触发| A8s
+    A8s --> A9s
 
-    B1 --> B2 --> B3 --> B4 --> B5 --> B6 --> C2 --> B7 --> B8
+    B1 --> B2
+    B2 -->|Step0 directive_bias| B3 & B4 & B5
+    B3 & B4 & B5 --> AGG
+    AGG -->|scores+position+cost| B6
+    B6 --> C2 --> B7 --> B8
+    A6 -.->|phase7_contingency| B8
     B8 --> B9
     B8 -->|持仓期间| C1
     C1 -->|P0告警| C3
@@ -88,20 +99,25 @@ graph TD
 
 ---
 
-### Team A — 研究预设（7个）
+### Team A — 研究预设（9个）
 
 **职责**: Screen 1 周线方向 + Screen 2 日线马丁格预设。**纯研究，不执行订单。**
 **Phase-0 强制**: Tavily 6 查询 + knowledge 检索，数据不到位则 HARD BLOCK。
+**Screen 2 执行顺序**: Phase-1（A1→A2→A3 分析）→ Phase-2（dream-backtest 验证 → dream-bayesian-opt 优化）→ Phase-3（输出 daily-presets + martingale-grid）。
 
 | ID | SKILL | 来源 | 阶段 | 核心功能 | 触发时机 |
 |----|-------|------|------|---------|---------|
 | A1 | dream-screen1-first | 6-TRADING | Screen 1 | 并行编排 A0+A1+A2+A3，输出周线方向+策略类型 | 每周日 20:00 |
-| A2 | dream-screen2-second | 6-TRADING | Screen 2 | 顺序 A1→A2→马丁格计算，输出日线预设+情景网格 | 每工作日 07:30 |
+| A2 | dream-screen2-second | 6-TRADING | Screen 2 | A1→A2→马丁格计算→Phase-2验证→输出日线预设 | 每工作日 07:30 |
 | A3 | dream-contradiction-theory | 1-TRADE | A0 | 矛盾论 OS（C1-C8 矛盾发现，4维评分定主矛盾） | 嵌入 A1/A2/A3 内 |
 | A4 | dream-strategy-research | 1-TRADE | A1 | 深度调研（五角形准则 + Tavily Phase-0） | Screen 1/2 A1 步骤 |
 | A5 | dream-first-principles | 1-TRADE | A2 | 第一性原理（L1/L2/L3 资金流 + 趋势阶段） | Screen 1/2 A2 步骤 |
-| A6 | dream-strategy-designer | 1-TRADE | A3 | 多情景战略合成（S1/S2/S3 概率+工具） | Screen 1 A3 步骤 |
+| A6 | dream-strategy-designer | 1-TRADE | A3 | 多情景战略合成（S1/S2/S3 概率+工具）；**输出 phase7_contingency 供 B8 读取** | Screen 1 A3 步骤 |
 | A7 | dream-regime-detector | 1-TRADE | 支持 | 市场状态 7 分类，Master Fit 下降触发蒸馏 | Phase-0 + A6 联动 |
+| **A8s** | **dream-backtest** | **1-TRADE** | **Screen 2 Phase-2** | **历史回测验证 martingale 参数可行性；输出 backtest_result（胜率/RR/最大回撤）** | **Screen 2 Phase-2，A1→A2→A3 完成后** |
+| **A9s** | **dream-bayesian-opt** | **1-TRADE** | **Screen 2 Phase-2** | **贝叶斯优化马丁格参数（TP/SL/间距/仓位比例）；依赖 A8s backtest_result** | **Screen 2 Phase-2，dream-backtest 完成后** |
+
+> **[G1 Fix]** `dream-backtest` 和 `dream-bayesian-opt` 是 Screen 2 Phase-2 的必须步骤。若任一步骤失败（回测数据不足/优化未收敛），Screen 2 降级为 Phase-1 输出（跳过 Phase-2，在 daily-presets.json 中标注 `phase2_skipped: true`）。
 
 ---
 
@@ -110,16 +126,25 @@ graph TD
 **职责**: 读取 Screen 2 预设，执行完整入场链。Gate C BLOCK 不可绕过。
 **硬约束**: A5 后无论 ENTER/SKIP 均必须调用 B9 写 episode。
 
+**[G2 Fix] 并行合约**: B3/B4/B5 必须**并行执行**，各自独立完成后聚合结果供 B6。Gate C (B6) 的入参要求：
+- `scores_result`（来自 B3）
+- `position_result`（来自 B4）
+- `execution_cost_result`（来自 B5）
+
+三个结果必须同时就绪才可触发 B6。任意一个失败则 Screen 3 输出 `PARALLEL_INPUT_INCOMPLETE`，本轮终止，写 SKIP episode。
+
+**[G3 Fix] phase7_contingency 合约**: A3（dream-strategy-designer）在 Screen 1 A3 步骤输出 S1/S2/S3 情景时，同时输出 `phase7_contingency`（黑天鹅/极端情景应对方案）。该字段写入 `sessions/{id}/team-a/screen1/strategy-type.json`，B8（dream-tactical-executor）在执行前必须读取此文件获取 contingency 指令。
+
 | ID | SKILL | 来源 | 阶段 | 核心功能 | 触发时机 |
 |----|-------|------|------|---------|---------|
 | B1 | dream-screen3-third | 6-TRADING | Screen 3 | 编排器：Screen 2 presets → 完整执行链 | 每工作日 09:00 |
 | B2 | dream-strategy-parser | 1-TRADE | Pre-A4 | Regime→策略路由，输出 directive_bias | Step 0 |
-| B3 | dream-signal-scoring-spec | 1-TRADE | 评分 | 8 维评分（trend/macro/onchain/ETF/memory/strategy/geo/pred） | 评分步骤 |
-| B4 | dream-risk-position-sizing | 1-TRADE | 风控 | 风险预算仓位，ATR 止损，单笔上限 150 USDT | 仓位步骤 |
-| B5 | dream-execution-cost-model | 1-TRADE | 费用 | 费率+滑点估算，atomic_bracket 校验 | 成本步骤 |
-| B6 | dream-pretrade-gatekeeper | 1-TRADE | Gate C | H001-H009 硬门禁，最终 PASS/SKIP 裁决 | Gate C |
+| B3 | dream-signal-scoring-spec | 1-TRADE | 评分 [并行] | 8 维评分；输出 scores_result（含 composite_confidence） | B2 后，与 B4/B5 并行 |
+| B4 | dream-risk-position-sizing | 1-TRADE | 风控 [并行] | 风险预算仓位，ATR 止损；输出 position_result | B2 后，与 B3/B5 并行 |
+| B5 | dream-execution-cost-model | 1-TRADE | 费用 [并行] | 费率+滑点估算；输出 execution_cost_result | B2 后，与 B3/B4 并行 |
+| B6 | dream-pretrade-gatekeeper | 1-TRADE | Gate C | H001-H009；入参：scores+position+cost 三合一；裁决 PASS/SKIP | B3+B4+B5 全部完成后 |
 | B7 | dream-tactical-validator | 1-TRADE | A4 | Demo 账户 3 层索引验证 | A4 步骤 |
-| B8 | dream-tactical-executor | 1-TRADE | A5 | 实盘执行（A7 门禁 + RM 顾问否决） | A5 步骤 |
+| B8 | dream-tactical-executor | 1-TRADE | A5 | 读 phase7_contingency；实盘执行（A7 门禁 + RM 顾问否决） | A5 步骤 |
 | **B9** | **learning-episode-writer** | **0-CORE** | **执行记录** | **结构化 episode，P006 梦游检测（SKIP≥7 告警）** | **A5 完成后** |
 
 集成规范: [skills/0-core-integration/episode-writer/INTEGRATION.md](../skills/0-core-integration/episode-writer/INTEGRATION.md)
@@ -171,20 +196,26 @@ graph TD
 ## 三、完整执行时序
 
 ```
-每周日 20:00   Team A Screen 1
+每周日 20:00   Team A Screen 1        [G6: 权威触发时间，以 CronCreate job b9ce16da 为准]
   Phase-0: Tavily 6查询 + knowledge检索
   -> A0矛盾论 + A1调研 + A2第一性原理 + A3战略 [并行]
+    A3输出 phase7_contingency → 写入 strategy-type.json
   -> C4 产物归档 -> 更新记忆
 
 每工作日 07:30 Team A Screen 2
   Phase-0: 价格漂移检查 + Tavily日线
-  -> A1->A2->马丁格计算 [顺序]
+  Phase-1: A1→A2→马丁格计算 [顺序]
+  Phase-2: dream-backtest → dream-bayesian-opt [顺序]   [G1: 新增]
+    失败则降级：phase2_skipped=true，输出Phase-1结果
+  Phase-3: 合并输出 daily-presets.json + martingale-grid.json
   -> C4 产物归档 -> 更新记忆
 
 每工作日 09:00 Team B Screen 3
-  Step0: B2 Regime路由
-  -> B3评分 + B4仓位 + B5成本 [并行]
-  -> C2 A7门禁 -> B6 Gate C -> B7 A4验证 -> B8 A5执行
+  Step0: B2 Regime路由 → directive_bias
+  -> B3评分 + B4仓位 + B5成本 [并行，三者全部完成才继续]   [G2: 并行合约]
+  -> AGGREGATE(scores+position+cost)
+  -> C2 A7门禁 -> B6 Gate C
+  -> B7 A4验证 -> B8 A5执行（读取 phase7_contingency）   [G3: contingency合约]
   -> B9 episode-writer [ENTER/SKIP 均写]
   -> C4 产物归档
 
@@ -198,11 +229,31 @@ graph TD
 
 ---
 
-## 四、新增 SKILL 集成索引
+## 四、数据流合约摘要（跨团队接口）
+
+| 接口 | 生产者 | 消费者 | 文件路径 | 备注 |
+|------|-------|-------|---------|------|
+| screen1_direction | A1 (Screen1) | A2 (Screen2), B1 (Screen3), B6 (Gate C H001) | memory/project_trading_session_state.md | H001/H002/H003 强制检查 |
+| daily-presets | A2 (Screen2) | B1 (Screen3) | sessions/{id}/team-a/screen2/daily-presets.json | Screen3 入口依赖 |
+| phase7_contingency | A6 (dream-strategy-designer) | B8 (dream-tactical-executor) | sessions/{id}/team-a/screen1/strategy-type.json | B8 执行前必读 [G3] |
+| scores_result | B3 (signal-scoring) | B6 (Gate C) | 内存传递 (Screen3 session) | 必须与 B4/B5 并行完成 [G2] |
+| position_result | B4 (position-sizing) | B6 (Gate C) | 内存传递 (Screen3 session) | 必须与 B3/B5 并行完成 [G2] |
+| execution_cost_result | B5 (cost-model) | B6 (Gate C) | 内存传递 (Screen3 session) | 必须与 B3/B4 并行完成 [G2] |
+| a7_gate_result | B8 内部调用A7 | B9 (episode-writer) | sessions/{id}/team-b/a7-gate.json | B9直接读文件 [G4] |
+| consecutive_skip_count | B9 历史Episodes | B9 (episode-writer) | sessions/*/team-b/episode.json | B9读最近20 episodes [G5] |
+| episode.json | B9 (episode-writer) | D2 (lesson-distiller) | sessions/{id}/team-b/episode.json | Process D 闭环基础 |
+| weekly-lessons | D2 (lesson-distiller) | D3 (proposal-generator) | sessions/{id}/review/weekly-lessons.json | min_freq=3 过滤 |
+| weekly-proposals | D3 (proposal-generator) | 人工审核 | sessions/{id}/review/weekly-proposals.json | H009: 不得自动部署 |
+
+---
+
+## 五、新增 SKILL 集成索引
 
 | SKILL | 团队 | INTEGRATION.md |
 |-------|------|----------------|
 | dream-constitution | Governance | [CONSTITUTION_COMPLIANCE.md](CONSTITUTION_COMPLIANCE.md) |
+| dream-backtest | Team A (A8s) | dream-multiskill-v2/skills/1-TRADE/dream-backtest |
+| dream-bayesian-opt | Team A (A9s) | dream-multiskill-v2/skills/1-TRADE/dream-bayesian-opt |
 | artifact-alignment-manager | Team C (C4) | [skills/0-core-integration/artifact-alignment/](../skills/0-core-integration/artifact-alignment/INTEGRATION.md) |
 | learning-episode-writer | Team B (B9) | [skills/0-core-integration/episode-writer/](../skills/0-core-integration/episode-writer/INTEGRATION.md) |
 | dream-knowledge | Knowledge Base (K1) | [skills/0-core-integration/knowledge/](../skills/0-core-integration/knowledge/INTEGRATION.md) |
@@ -211,4 +262,4 @@ graph TD
 
 ---
 
-*最后更新: 2026-05-26 | 维护者: 6-TRADING Claude Code 协作系统*
+*最后更新: 2026-05-26 v1.1 | 修复缺口 G1/G2/G3/G6 | 维护者: 6-TRADING Claude Code 协作系统*
