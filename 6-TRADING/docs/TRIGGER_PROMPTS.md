@@ -1,10 +1,11 @@
 # 6-TRADING 触发提示词规范 v1.3
 
-> **版本**: v1.3 | **更新日期**: 2026-05-27
+> **版本**: v1.4 | **更新日期**: 2026-05-27
 > **维护说明**: 本文档是 6-TRADING 4 个 CronCreate 定时任务的**权威提示词来源**。
 > **多 Claude Code 协作**: 每次修改触发提示词后，必须同步更新本文档，确保所有 Claude Code 实例使用相同版本。
 > **同步关系**: 本文档 → Claude Code 本地 `memory/reference_trading_cron_jobs.md`（单向从此同步）
 > **v1.3 变更**: 新增 Governance 层（G2 合规/G3 自动修复/G4 升级路由/CC 成本守卫）；Process D 新增 Step 0C/1.5b/1.5c/4.5/4.6；完整提案生命周期闭环（含 R0-R3 分级落地矩阵）
+> **v1.4 变更**: 正式绑定 tavily SKILL（4-GENERIC）为 Phase-0 搜索原语；标注 basic/advanced/news/general 模式；新增权威域名白名单注释
 
 ---
 
@@ -30,15 +31,21 @@
   - 用量 85-95% → P0.4b 降级为跳过（archive_data:"budget_limited"），其余正常
   - 用量 < 85% → 正常执行
 
-P0.1: Tavily搜索 "Bitcoin BTC price USD {YYYY-MM-DD} current" → 提取当前价格
-P0.2: Tavily搜索 "Bitcoin perpetual futures funding rate {YYYY-MM-DD} OKX Binance" → 提取资金费率方向
-P0.3: Tavily搜索 "Bitcoin spot ETF net inflow outflow {YYYY-MM-DD}" → 提取资金流向（亿USD）
-P0.4: Tavily搜索 "Bitcoin macro risk factors {YYYY-MM-DD} Fed geopolitical" → 提取宏观驱动
-P0.4b: [dream-archive-center] Tavily搜索 "Bitcoin {macro_keyword} historical price action 2020 2022 2024"
+P0.1: [tavily TX basic/news] 搜索 "Bitcoin BTC price USD {YYYY-MM-DD} current" → 提取当前价格
+      域白名单: coindesk.com, coingecko.com, coinmarketcap.com, tradingview.com
+P0.2: [tavily TX basic/news] 搜索 "Bitcoin perpetual futures funding rate {YYYY-MM-DD} OKX Binance" → 提取资金费率方向
+      域白名单: coinglass.com, okx.com, binance.com
+P0.3: [tavily TX basic/news] 搜索 "Bitcoin spot ETF net inflow outflow {YYYY-MM-DD}" → 提取资金流向（亿USD）
+      域白名单: farside.co.uk, coindesk.com, theblock.co
+P0.4: [tavily TX advanced/general] 搜索 "Bitcoin macro risk factors {YYYY-MM-DD} Fed geopolitical" → 提取宏观驱动
+      域白名单: federalreserve.gov, reuters.com, bloomberg.com, ft.com
+P0.4b: [dream-archive-center + tavily TX advanced/general] 搜索 "Bitcoin {macro_keyword} historical price action 2020 2022 2024"
        → 提取 2-3 个历史类比情景（similarity_score/btc_outcome/key_difference）
        → 非 HARD BLOCK：失败或预算限制则 archive_data:"unavailable"，继续执行
-P0.5: Tavily搜索 "Bitcoin support resistance technical analysis {YYYY-MM-DD}" → 提取关键价格位
-P0.6: Tavily搜索 "Bitcoin fear greed index {YYYY-MM-DD}" → 提取市场情绪
+P0.5: [tavily TX basic/general] 搜索 "Bitcoin support resistance technical analysis {YYYY-MM-DD}" → 提取关键价格位
+      域白名单: tradingview.com, cryptoquant.com, glassnode.com
+P0.6: [tavily TX basic/news] 搜索 "Bitcoin fear greed index {YYYY-MM-DD}" → 提取市场情绪
+      域白名单: alternative.me, coinmarketcap.com
 P0.7: 价格可信度验证 — 若搜索价格与上次记录基价偏差 > 20%，输出 DATA_ALERT 并停止执行
 P0.9: [dream-knowledge K1 检索] 查询 knowledge/strategy_scores/ 中最近 5 个 BTC 同向策略：
        → 提取平均胜率、平均 RR、最常见失败原因
@@ -87,7 +94,7 @@ P0.8: 合并以上数据为 data_context（含 historical_analogues + knowledge_
   - 用量 < 85% → 正常执行
 
 [Phase-0 数据采集与漂移检查]
-P0.1: Tavily搜索获取当前 BTC 价格
+P0.1: [tavily TX basic/news] 搜索获取当前 BTC 价格（域白名单: coindesk.com, coingecko.com）
 P0.2: 与记忆中 screen1_btc_price_basis 比对
   - 偏差 > 10%：自动触发 Screen1 重跑，当前 Screen2 暂停
   - 偏差 5-10%：继续执行，在输出中标注 PRICE_DRIFT_WARNING
@@ -293,6 +300,7 @@ Step 6 [记忆更新]:
 | v1.1 | 2026-05 | G1-G6 缺口修复：dream-backtest/bayesian-opt / B3/B4/B5 并行合约 / phase7_contingency |
 | v1.2 | 2026-05-26 | 集成 5 个 2-INTELLIGENCE SKILL：IA 偏见注入 / ACH矩阵 / master-seminar / archive-center P0.4b / OE / DA |
 | v1.3 | 2026-05-27 | 集成 6 个 3-SUPPORT SKILL：CC Tavily 预算守卫 / AR 账户隔离 / Process D Step 0C/1.5b/1.5c/4.5/4.6 完整提案闭环 |
+| v1.4 | 2026-05-27 | 正式绑定 tavily 4-GENERIC SKILL 为 Phase-0 搜索原语；标注 basic/advanced/news/general 模式和权威域名白名单 |
 
 ---
 
