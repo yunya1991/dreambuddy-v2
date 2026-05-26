@@ -4,7 +4,7 @@
 > **维护说明**: 本文档是 6-TRADING 4 个 CronCreate 定时任务的**权威提示词来源**。
 > **多 Claude Code 协作**: 每次修改触发提示词后，必须同步更新本文档，确保所有 Claude Code 实例使用相同版本。
 > **同步关系**: 本文档 → Claude Code 本地 `memory/reference_trading_cron_jobs.md`（单向从此同步）
-> **v1.3 变更**: 新增 Governance 层（G2 合规/G3 自动修复/G4 升级路由/CC 成本守卫）；Process D 新增 Step 0C/1.5b/1.5c/4.5/4.6；完整提案生命周期闭环
+> **v1.3 变更**: 新增 Governance 层（G2 合规/G3 自动修复/G4 升级路由/CC 成本守卫）；Process D 新增 Step 0C/1.5b/1.5c/4.5/4.6；完整提案生命周期闭环（含 R0-R3 分级落地矩阵）
 
 ---
 
@@ -248,10 +248,12 @@ Step 4.5 [提案合规审查 — 新增]:
 Step 4.6 [提案落地 — 新增]:
   调用 auto-repair (G3)：
   - 扫描 compliance-receipt-*.json，执行 auto_land_allowed=true 的提案
+  - R0 knowledge_base_update → 自动更新 knowledge/ 对应文件（strategy_scores / regime_patterns）
   - R1 martingale_param_update → 自动更新 TRIGGER_PROMPTS.md 参数段
   - R1 skill_improvement_plan → 自动更新对应 INTEGRATION.md 的 PIP 段
   - R2 trigger_prompt_patch / gate_threshold_update → 写入 governance/pending-approvals.md
     → [dream-operation-director G4] 路由人工审批（通知 risk_owner / strategy_owner）
+  - R3 skill_replacement → 直接路由 G4，G3 不处理
   - 输出: governance/auto-repair-report.json
 
 Step 3.5 [大师动态进化]（D1 A8 完成后执行）:
