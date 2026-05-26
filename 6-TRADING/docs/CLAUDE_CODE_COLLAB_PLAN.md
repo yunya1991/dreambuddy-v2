@@ -314,3 +314,59 @@ sessions/
 ---
 
 > **文档维护**: 此文档由 Claude Code 生成并维护。变更需通过 PR 合入 main 分支。
+
+
+---
+
+## 十、SKILL 注册表与治理
+
+> **完整注册表**: [SKILL_REGISTRY.md](SKILL_REGISTRY.md)（22 个 SKILL，5 大团队分类 + Mermaid 流程图）
+
+### 团队职能升级（v2.0）
+
+原三团队（Team A/B + Gate C + Process D）扩展为**五职能分类**：
+
+| 职能 | 原名 | SKILL 数 | 核心职责 |
+|------|------|---------|---------|
+| Governance | — | 1 | dream-constitution 宪法约束（全团队前置）|
+| Team A | Team A | 7 | 研究预设（Screen 1/2，纯研究）|
+| Team B | Team B | 9 | 入场执行（Screen 3 + episode 记录）|
+| Team C | Gate C 扩展 | 4 | 日内监控离场（A6/A7/A9 + 产物归档）|
+| Process D | Process D 升级 | 3 | 三级学习闭环（A8→knowledge→distill→propose）|
+| Knowledge Base | — | 1 | 策略知识库（dream-knowledge v1.1）|
+
+### 0-CORE SKILL 集成（v2.0 新增）
+
+本次从 dream-multiskill-v2/skills/0-CORE 集成 6 个 SKILL：
+
+| SKILL | 集成位置 | 核心价值 |
+|-------|---------|---------|
+| dream-constitution v2.9 | Governance（所有团队） | 宪法约束，H001-H009 硬门禁 |
+| artifact-alignment-manager | Team C (C4) | session 产物标准化投递 |
+| learning-episode-writer | Team B (B9) | 结构化 episode 替换自由格式日志 |
+| dream-knowledge v1.1 | Knowledge Base (K1) | 策略知识库，Screen 1 Phase-0 可检索 |
+| learning-lesson-distiller | Process D (D2) | episodes→lessons 规律提炼 |
+| learning-proposal-generator | Process D (D3) | lessons→proposals 改进提案 |
+
+**集成规范文件**: `skills/0-core-integration/{skill-name}/INTEGRATION.md`
+
+### Process D 三级学习闭环（升级版）
+
+```
+A8 批评 (D1) → dream-knowledge 写入 (K1) → lesson-distiller (D2) → proposal-generator (D3)
+                                              ↓
+                                  weekly-lessons.json + weekly-proposals.json
+                                              ↓
+                                     人工审核 → 更新触发提示词/参数
+```
+
+---
+
+## 十一、宪法合规声明
+
+> 所有 6-TRADING 决策遵循 dream-constitution v2.9，具体映射见 [CONSTITUTION_COMPLIANCE.md](CONSTITUTION_COMPLIANCE.md)。
+
+核心约束：
+- H008: Phase-0 Tavily 数据采集未完成 → SCREEN1_BLOCKED
+- H001-H003: 无/过期/反向 Screen1 方向 → Gate C HARD_FAIL
+- H009: proposals 未人工审核 → 不得自动部署
