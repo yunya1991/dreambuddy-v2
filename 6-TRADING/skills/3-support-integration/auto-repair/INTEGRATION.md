@@ -38,7 +38,7 @@ sessions/*/review/weekly-proposals.json
 
 | 提案类型 | R 级 | 合规通过后 | 落地目标文件 |
 |---------|------|----------|------------|
-| `martingale_param_update` | R1 | ✅ 自动落地 | `TRIGGER_PROMPTS.md` 的 Screen 2 参数段 |
+| `martingale_param_update` | R1 | ✅ 自动落地 | `TRIGGER_PROMPTS.md` 的 Screen 2 参数段（`<!-- MARTINGALE_PARAMS_START -->` 至 `<!-- MARTINGALE_PARAMS_END -->` 之间的文本）|
 | `knowledge_base_update` | R0 | ✅ 自动落地 | `knowledge/` 对应文件 |
 | `trigger_prompt_patch` | R2 | ⏸️ 等待人工 | 标注 `pending_human_review`，通知 dream-operation-director |
 | `gate_threshold_update` | R2 | ⏸️ 等待人工 | 同上 |
@@ -48,7 +48,7 @@ sessions/*/review/weekly-proposals.json
 
 | 动作 | 说明 | 目标 |
 |------|------|------|
-| 更新触发提示词参数 | 仅限 R1 参数调整段 | `6-TRADING/docs/TRIGGER_PROMPTS.md` |
+| 更新触发提示词参数 | 仅限 R1 参数调整段（定位 `<!-- MARTINGALE_PARAMS_START -->` / `<!-- MARTINGALE_PARAMS_END -->` 标记，只替换标记内的数值，不修改标记外文本）| `6-TRADING/docs/TRIGGER_PROMPTS.md` |
 | 更新知识库 | R0 历史数据 / 规律更新 | `6-TRADING/knowledge/` |
 | 标注提案状态 | 所有提案执行后更新状态 | `weekly-proposals.json` status 字段 |
 | 写落地报告 | 记录本次落地结果 | `sessions/{id}/governance/auto-repair-report.json` |
@@ -136,4 +136,4 @@ monitored_accounts:
 
 ---
 
-*最后更新: 2026-05-27 v1.0 | 集成 auto-repair v2.1 → Governance G3*
+*最后更新: 2026-05-27 v1.1 — GAP-TD2 fix: 新增 MARTINGALE_PARAMS_START/END 标记解析规范，确保 G3 精准落地*
