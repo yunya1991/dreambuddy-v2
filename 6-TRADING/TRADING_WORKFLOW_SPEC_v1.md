@@ -1,9 +1,12 @@
 # 6-TRADING 工作流规范 v1.0
 
-> **版本**: v1.0
-> **日期**: 2026-05-16
-> **状态**: 待审核
+> **版本**: v1.1
+> **日期**: 2026-05-27
+> **状态**: 部分更新（Section 1.4 频率/Section 2 产物存储已修订）
 > **作者**: DreamBuddy 交易系统
+>
+> **v1.1 变更**: 产物存储从邮箱方案（`~/.workbuddy/boss-secretary/`）迁移到
+> sessions/ 目录方案，详见 `docs/ARTIFACT_STORAGE_GUIDE.md`。
 
 ---
 
@@ -241,115 +244,108 @@
 
 ---
 
-### 2.2 6-TRADING 邮箱（新增）
+### 2.2 产物存储（Sessions 方案）
 
-#### 邮箱定义
+> **v1.1 变更**: 旧邮箱方案（`~/.workbuddy/boss-secretary/`）已废弃，全面迁移至 sessions/ 目录方案。
+> 详细规范见 `docs/ARTIFACT_STORAGE_GUIDE.md`。
 
-| 项目 | 值 |
-|:-----|:---|
-| **邮箱名称** | 6-TRADING 交易邮箱 |
-| **路径** | `~/.workbuddy/skills/boss-secretary/reports/trading/6-trading/` |
-| **用途** | 接收第一屏/第二屏/A4/A5/A6/A9 的产物报告 |
-| **扫描频率** | 每1小时 |
-| **上游** | 第一屏周度任务、第二屏日度任务、A4/A5/A6/A9自动化 |
-| **下游** | 产物中台 (localhost:3456) → 前端交易面板 |
+#### 存储路径总览
 
-#### 邮箱目录结构
+| 层级 | 路径 | 说明 |
+|:-----|:-----|:-----|
+| **根目录** | `6-TRADING/sessions/` | 所有交易产物根目录 |
+| **活跃指针** | `sessions/ACTIVE_SESSION.json` | 当前会话指针（必读） |
+| **历史索引** | `sessions/SESSION_INDEX.json` | 所有历史会话索引 |
+| **会话目录** | `sessions/{YYYYMMDD}-{SYMBOL}-{TRIGGER}/` | 每次研究/交易独立目录 |
+
+#### 会话内产物分类
+
+| 子目录 | 职责 | 主要产物 |
+|:-------|:-----|:---------|
+| `team-a/screen1/` | 第一屏研究 | 方向报告、strategy-type.json |
+| `team-a/screen2/` | 第二屏预设 | daily-presets.json、order-plan.md |
+| `team-b/` | 执行产物 | execution-log.md、position-state.json |
+| `gate-c/` | 门禁结果 | pretrade-check.json |
+| `review/` | 复盘产物 | a8-reflection.md |
+
+#### 写入规则（所有 SKILL 必须遵守）
 
 ```
-~/.workbuddy/skills/boss-secretary/reports/trading/6-trading/
-├── screen1/                    # 第一屏输出（周度）
-│   └── screen1_{YYYYMMDD}.md
-├── screen2/                    # 第二屏输出（每日）
-│   └── screen2_{YYYYMMDD}.md
-├── signals/                    # 第三屏信号（A4/A5/A6/A9）
-│   ├── a4_signal_{ts}.md
-│   ├── a5_signal_{ts}.md
-│   ├── a6_signal_{ts}.md
-│   └── a9_signal_{ts}.md
-├── orders/                     # 当前活跃订单状态
-│   └── active_orders.json
-└── execution_log/              # 执行日志
-    └── exec_{YYYYMMDD}.json
+1. 先读取 ACTIVE_SESSION.json 确认当前 session_id
+2. 所有产物写入 sessions/{session_id}/ 对应子目录
+3. 写入后更新 meta.json 的 last_updated
+4. A9 离场后写入 session-summary.md，更新 ACTIVE_SESSION.json status = "closed"
+
+禁止事项:
+  ✗ 向 ~/.workbuddy/boss-secretary/ 写入产物（已废弃）
+  ✗ 在 sessions/ 以外存储交易产物
 ```
 
-#### 邮箱产物格式
-
-每个产物必须包含完整 frontmatter：
-
-```yaml
----
-title: "第一屏周度方向 YYYY-MM-DD"
-department: trading
-chain_phase: screen1
-date: "YYYY-MM-DDTHH:MM:SS"
-type: direction_decision | order_setup | signal_trigger | execution_log
-status: completed
-confidence: 0-100
-inst_id: "BTC-USDT-SWAP"
----
-```
+完整目录结构、索引文件格式和迁移对照表，详见 **`docs/ARTIFACT_STORAGE_GUIDE.md`**。
 
 ---
 
-### 2.3 邮箱投递配置更新
+### 2.3 各 SKILL 产物写入路径
 
-需要更新以下SKILL的投递配置，增加 6-TRADING 邮箱地址：
+各 SKILL 执行完成后，将产物写入当前活跃 session 对应子目录（旧邮箱投递模式已废弃）：
 
-| SKILL | 当前投递 | 需新增 |
-|:------|:---------|:-------|
-| **A4** dream-tactical-validator | 秘书邮箱 + 前端产物中心 | + 6-TRADING 邮箱 |
-| **A5** dream-tactical-executor | 秘书邮箱 + 前端产物中心 | + 6-TRADING 邮箱 |
-| **A6** dream-intelligence-monitor | 秘书邮箱 + 前端产物中心 | + 6-TRADING 邮箱 |
-| **A9** dream-exit-skill-v2 | 秘书邮箱 + 前端产物中心 | + 6-TRADING 邮箱 |
-| **AAM** artifact-alignment-manager | 前端产物中心 | + 6-TRADING 邮箱（读取扫描） |
+| SKILL | 产物写入路径 | 关键产物 |
+|:------|:------------|:---------|
+| **A0-A3**（Screen 1） | `team-a/screen1/` | `weekly-direction.md`, `strategy-type.json` |
+| **A1-A3**（Screen 2） | `team-a/screen2/` | `daily-presets.json`, `order-plan.md` |
+| **A4** dream-tactical-validator | `team-b/a4-validation.json` | `result`, `confidence` |
+| **A5** dream-tactical-executor | `team-b/execution-log.md` | 价格/数量/止损 |
+| **A6** dream-intelligence-monitor | `team-b/a6-events.jsonl` | 事件流（append） |
+| **A9** dream-exit-skill-v2 | `team-b/a9-exit.json` | `layer`, `pnl` |
+| **Gate C** pretrade-gatekeeper | `gate-c/pretrade-check.json` | `pass: true/false` |
+| **A8** 复盘 | `review/a8-reflection.md` | 理论实践验证 |
 
 ---
 
-### 2.4 6-TRADING 邮箱扫描器（新增自动化）
+### 2.4 Session 生命周期管理
 
-**功能**: 每小时扫描 6-TRADING 邮箱，提取交易指令，投递到产物中台
-
-**执行流程**:
 ```
-每小时触发
+创建新 Session
     ↓
-扫描 6-TRADING 邮箱新文件
+写入 sessions/{YYYYMMDD}-{SYMBOL}-{TRIGGER}/meta.json
     ↓
-解析产物 frontmatter
+更新 ACTIVE_SESSION.json（指向新 session）
     ↓
-提取交易指令（四类订单变更 / 信号触发 / 离场决策）
+更新 SESSION_INDEX.json（追加记录）
     ↓
-生成交易指令 JSON
+各 SKILL 执行并写入对应子目录
     ↓
-投递到产物中台 (artifact-alignment-manager)
+A9 离场 → 写入 session-summary.md
     ↓
-产物中台路由到前端
-    ↓
-前端交易面板展示 → 用户确认/修改 → API执行
+更新 ACTIVE_SESSION.json status = "closed"
 ```
 
-**自动化配置**:
-- 频率: 每小时
-- CWDS: 6-TRADING 工作区
-- 投递: 产物中台 + 秘书邮箱
+**Session 命名规则**:
+
+| TRIGGER | 触发时机 | 示例 |
+|:--------|:---------|:-----|
+| `SCREEN1` | 第一屏周线分析 | `20260527-BTC-USDT-SWAP-SCREEN1` |
+| `SCREEN2` | 第二屏日线预设 | `20260528-BTC-USDT-SWAP-SCREEN2` |
+| `ENTRY` | 入场执行 | `20260528-BTC-USDT-SWAP-ENTRY` |
+| `REVIEW` | 每周复盘 | `20260602-BTC-USDT-SWAP-REVIEW` |
 
 ---
 
 ### 2.5 完整工作流时序图
 
 ```
-周一 08:00    第一屏任务 → 输出方向 → 6-TRADING/screen1/
+周日 20:00    第一屏任务 → 输出方向 → sessions/{id}/team-a/screen1/
     ↓
-周一~周日
-  每日 09:00  第二屏任务 → 读取方向 → 设置四类订单 → 6-TRADING/screen2/
+周一~周五
+  每日 07:30  第二屏任务 → 读取方向 → 设置三大预设 → sessions/{id}/team-a/screen2/
     ↓
-  每小时      6-TRADING扫描器 → 扫描邮箱 → 投递产物中台 → 前端展示
+  每日 09:00  Team B 执行 → 读取预设 → A7门禁→A4验证→GateC→A5下单
+                                        → sessions/{id}/team-b/
     ↓
-  每 4h       A4验证 → 高置信度信号 → 6-TRADING/signals/ → 前端调仓建议
-  每 4h       A6监控 → 高置信度信号 → 6-TRADING/signals/ → 前端调仓建议
-  每 4h       A9离场 → 高置信度信号 → 6-TRADING/signals/ → 前端离场建议
-  每 12h      A5执行 → 高置信度信号 → 6-TRADING/signals/ → 前端执行建议
+  每 4h       A4验证 → 置信度≥70 → sessions/{id}/team-b/a4-validation.json
+  每 4h       A6监控 → 置信度≥80 → sessions/{id}/team-b/a6-events.jsonl
+  每 4h       A9离场 → 置信度≥60 → sessions/{id}/team-b/a9-exit.json
+  每 12h      A5执行 → 置信度≥70 → sessions/{id}/team-b/execution-log.md
     ↓
   用户        前端查看 → 确认/修改 → API执行交易
 ```
@@ -417,32 +413,33 @@ Level 3: 等待人工介入
 
 | 序号 | 任务名称 | 频率 | 类型 | 状态 |
 |:-----|:---------|:-----|:-----|:-----|
-| 1 | 第一屏-周度方向确定 | 每周一 08:00 | 新增 | 待创建 |
-| 2 | 第二屏-日线订单设置 | 每日 09:00 | 新增 | 待创建 |
-| 3 | 6-TRADING邮箱扫描器 | 每小时 | 新增 | 待创建 |
+| 1 | 第一屏-周度方向确定 | 每周日 20:00 | 新增 | 待创建 |
+| 2 | 第二屏-日线订单设置 | 每日 07:30（工作日） | 新增 | 待创建 |
+| 3 | Team B-执行入场 | 每日 09:00（工作日） | 新增 | 待创建 |
 | 4 | 交易工作流监控 | 每4小时 | 新增 | 待创建 |
-| 5 | A4战术验证 | 每4h | 已有 | 需增加投递 |
-| 6 | A6情报监控 | 每4h | 已有 | 需增加投递 |
-| 7 | A9离场检查 | 每4h | 已有 | 需增加投递 |
-| 8 | A5决策执行 | 每12h | 已有 | 需增加投递 |
+| 5 | A4战术验证 | 每4h | 已有 | 需更新写入路径 |
+| 6 | A6情报监控 | 每4h | 已有 | 需更新写入路径 |
+| 7 | A9离场检查 | 每4h | 已有 | 需更新写入路径 |
+| 8 | A5决策执行 | 每12h | 已有 | 需更新写入路径 |
 | 9 | A1深度调研 | 每日01:00 | 已有 | 保持不变 |
 | 10 | A2第一性原理 | 每日01:30 | 已有 | 保持不变 |
 | 11 | A3沙盘推演 | 每日02:30 | 已有 | 保持不变 |
+| 12 | Process D-周度复盘 | 每周一 06:00 | 新增 | 待创建 |
 
 ---
 
 ## 四、执行计划（待审核确认后执行）
 
 ### Phase 1: 基础设施搭建
-1. 创建 6-TRADING 邮箱目录结构
-2. 更新 A4/A5/A6/A9 SKILL 的投递配置（增加 6-TRADING 邮箱）
-3. 更新 AAM SKILL（增加 6-TRADING 邮箱扫描路径）
-4. 创建 6-TRADING 邮箱扫描器脚本
+1. 创建 `sessions/` 目录结构（含 `_template/`、`ACTIVE_SESSION.json`、`SESSION_INDEX.json`）
+2. 更新 A4/A5/A6/A9 SKILL 的产物写入路径（指向 sessions/ 子目录，废弃旧邮箱路径）
+3. 创建 `docs/ARTIFACT_STORAGE_GUIDE.md`（产物存储完整规范）
+4. 创建 `skills/dream-doc-sync-gate/SKILL.md`（文档同步门禁）
 
 ### Phase 2: 自动化任务创建
-5. 创建第一屏周度方向确定自动化（每周一 08:00）
-6. 创建第二屏日线订单设置自动化（每日 09:00）
-7. 创建 6-TRADING 邮箱扫描器自动化（每小时）
+5. 创建第一屏周度方向确定自动化（每周日 20:00）
+6. 创建第二屏日线订单设置自动化（每日 07:30，工作日）
+7. 创建 Team B 执行自动化（每日 09:00，工作日）
 8. 创建交易工作流监控自动化（每4h）
 
 ### Phase 3: 策略SKILL修正
