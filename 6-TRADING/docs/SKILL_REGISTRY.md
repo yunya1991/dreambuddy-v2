@@ -319,7 +319,7 @@ graph TD
 
 | SKILL | 团队 | 来源 | INTEGRATION.md |
 |-------|------|------|----------------|
-| dream-constitution | Governance (G1) | 0-CORE | [CONSTITUTION_COMPLIANCE.md](CONSTITUTION_COMPLIANCE.md) |
+| dream-constitution | Governance (G1) | 0-CORE | [CONSTITUTION_COMPLIANCE.md](CONSTITUTION_COMPLIANCE.md)（6-TRADING 宪法映射，非 SKILL INTEGRATION.md）|
 | **ai-trading-compliance** | **Governance (G2)** | **3-SUPPORT** | [3-support-integration/ai-trading-compliance/](../skills/3-support-integration/ai-trading-compliance/INTEGRATION.md) |
 | **auto-repair** | **Governance (G3)** | **3-SUPPORT** | [3-support-integration/auto-repair/](../skills/3-support-integration/auto-repair/INTEGRATION.md) |
 | **dream-operation-director** | **Governance (G4)** | **3-SUPPORT** | [3-support-integration/dream-operation-director/](../skills/3-support-integration/dream-operation-director/INTEGRATION.md) |
@@ -333,6 +333,7 @@ graph TD
 | dream-knowledge | Knowledge Base (K1) | 0-CORE | [0-core-integration/knowledge/](../skills/0-core-integration/knowledge/INTEGRATION.md) |
 | learning-lesson-distiller | Process D (D2) | 0-CORE | [0-core-integration/lesson-distiller/](../skills/0-core-integration/lesson-distiller/INTEGRATION.md) |
 | learning-proposal-generator | Process D (D3) | 0-CORE | [0-core-integration/proposal-generator/](../skills/0-core-integration/proposal-generator/INTEGRATION.md) |
+| A8-theory-practice-verification | Process D (D1) | 1-TRADE | dream-multiskill-v2/1-TRADE/A8-theory-practice-verification/SKILL.md（无本地集成文件，直接参考原始 SKILL）|
 | dream-data-analysis | Process D (DA) | 2-INTEL | [2-intelligence-integration/data-analysis/](../skills/2-intelligence-integration/data-analysis/INTEGRATION.md) |
 | dream-oneirology | Process D (OE) | 2-INTEL | [2-intelligence-integration/oneirology/](../skills/2-intelligence-integration/oneirology/INTEGRATION.md) |
 | **dream-performance-review** | **Process D (PR)** | **3-SUPPORT** | [3-support-integration/dream-performance-review/](../skills/3-support-integration/dream-performance-review/INTEGRATION.md) |
@@ -341,4 +342,4 @@ graph TD
 
 ---
 
-*最后更新: 2026-05-27 v1.3 | 集成 3-SUPPORT 6个 SKILL | Governance 层从 1 扩展到 4 | Process D 从 5 扩展到 8 | 维护者: 6-TRADING Claude Code 协作系统*
+*最后更新: 2026-05-27 v1.3.1 | GAP-A1/A2 fix: G1 集成索引路径说明补充，新增 D1 集成索引条目 | 维护者: 6-TRADING Claude Code 协作系统*
