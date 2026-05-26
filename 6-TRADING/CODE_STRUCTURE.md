@@ -37,7 +37,7 @@
 │   ├── a4_validation_executor.py    # A4战术验证
 │   ├── a5_guards.py                 # A5门禁
 │   ├── dream_trade_exec.py          # 交易执行
-│   ├── dream_stop_loss_monitor.py   # 止损监控
+│   ├── dream_stop_loss_monitor.py   # 止损监控（v1.1 已修复硬编码凭证）
 │   ├── okx_cli.py                   # OKX CLI封装（v1.3.4）
 │   ├── okx_unified_toolkit.py       # OKX统一工具包（37KB）
 │   ├── stress_test.py               # 压力测试
@@ -45,8 +45,9 @@
 │   ├── sync_from_44304.sh           # 同步44304
 │   └── sync_frontend.sh             # 同步3-FRONTEND
 │
-├── skills/                    # 项目级SKILL（22个）
+├── skills/                    # 项目级SKILL（23个）
 │   ├── dream-systematic-trading/   # ★ 三屏交易总入口SKILL
+│   ├── dream-screen3-third/         # ★ 第三屏实时执行层（v1.1）
 │   ├── dream-contradiction-theory/  # A0
 │   ├── dream-strategy-research/     # A1
 │   ├── dream-first-principles/      # A2
@@ -78,9 +79,19 @@
 │   ├── backtest_result_v2.json      # 200U回测结果
 │   └── backtest_v2_10k.json         # 10kU回测结果
 │
-├── docs/                      # 架构与规范文档（10个）
+├── sessions/                  # 交易会话归档（每次研究一个文件夹）
+│   ├── README.md              # 命名规范：{YYYYMMDD}-{SYMBOL}-{TRIGGER}/
+│   └── _template/             # 会话目录模板
+│       ├── meta.json          # 会话状态机（created→monitoring→closed）
+│       ├── team-a/            # Team A 研究产物（screen1/ screen2/）
+│       ├── team-b/            # Team B 执行日志（a4/a5/a6/a7/a9）
+│       ├── gate-c/            # Gate C 门禁结果
+│       └── review/            # A8 复盘
+│
+├── docs/                      # 架构与规范文档（11个）
 │   ├── ARCHITECTURE_DESIGN_v2.0.md       # 架构设计（120KB）
 │   ├── ARCHITECTURE_DIAGRAM_v2.0.svg     # 架构图
+│   ├── CLAUDE_CODE_COLLAB_PLAN.md        # ★ Claude Code 协作方案（v1.0）
 │   ├── TRADING_WORKFLOW_SPEC_v1.md       # 工作流规范（v1.0）
 │   ├── BRIDGE_ARCHITECTURE_v1.0.md       # Bridge架构
 │   ├── A0_A9_SKILL_COVERAGE_v1.0.md     # SKILL覆盖
@@ -160,7 +171,10 @@
 | 前端 | Next.js | 端口3000 |
 | 邮箱扫描器 | v1.0 | 每小时扫描 |
 | 工作流规范 | v1.0 | TRADING_WORKFLOW_SPEC |
+| dream_stop_loss_monitor | v1.1 | 凭证改用 env vars/~/.okx/config.toml |
+| dream-screen3-third SKILL | v1.1 | 第三屏执行层完整定义 |
+| Claude Code 协作方案 | v1.0 | docs/CLAUDE_CODE_COLLAB_PLAN.md |
 
 ---
 
-*最后更新: 2026-05-16*
+*最后更新: 2026-05-27*
