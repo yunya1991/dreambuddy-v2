@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-回测策略实现模块 v3.0
+回测策略实现模块 v3.1
 ======================
 忠实实现 TRADING_WORKFLOW_SPEC_v1.md 设计规范
 
-v3.0 重大修正 (完全对齐规范):
+v3.1 规范对齐修正 (D1/D2):
+  D1. 分批止盈比例: 50%→30%→20% (原 30%/30%/40%)
+  D2. 止损动态化: 加仓阶段=Level3极限价保护; 马丁完成后=均价×0.80
+
+v3.0 基础修正 (完全对齐规范):
   1. 止损: 固定20% (基于入场价), 不再使用ATR倍数
   2. 加仓: 等额加仓 (不再递减)
   3. 止盈: 仅Level 3加满后启用 (不再Level 2即可)
@@ -84,7 +88,7 @@ class Screen2Output:
     position_pct: float              # 单层仓位比例 (总仓位的1/4)
     add_on_levels: List[float]       # 3个加仓价位
     tp_levels: List[float]           # 3个止盈价位 (2x/3x/5x ATR)
-    stop_loss_price: float           # 固定20%止损价
+    stop_loss_price: float           # 动态止损价: 加仓阶段=Level3极限价; 马丁完成后=均价×0.80
     atr: float
     volatility: float
 
@@ -144,8 +148,8 @@ DEFAULT_STRATEGY_PARAMS = {
     "tp_level_2": 3.0,                # 第二档止盈 ATR倍数 (平30%)
     "tp_level_3": 5.0,                # 第三档止盈 ATR倍数 (平40%)
 
-    # 止损: 固定20%, 不可被优化覆盖 (硬性约束)
-    "stop_loss_pct": 20.0,            # 止损百分比 (固定, 不优化)
+    # 止损: 20% 为基准 (加仓阶段=Level3保护; 马丁完成后=均价×0.80)
+    "stop_loss_pct": 20.0,            # 止损百分比基准 (不可优化覆盖)
 
     # 仓位参数
     "base_pos_pct": 100.0,            # 基础仓位比例 (用于信号强度缩放)
@@ -164,7 +168,7 @@ def _apply_opt_params(defaults: dict, overrides: dict = None) -> dict:
 
 # ==================== 分批止盈比例 (规范) ====================
 
-TP_RATIOS = [0.30, 0.30, 0.40]  # 第一档30%, 第二档30%, 第三档40%
+TP_RATIOS = [0.50, 0.30, 0.20]  # 第一档50%, 第二档30%, 第三档20% (规范: 50%→30%→20%)
 
 
 # ==================== 第一屏: 周线决策 ====================
@@ -333,9 +337,9 @@ def run_screen2(
     """
     第二屏: 日线预设 (对齐规范 1.2)
 
-    核心修正:
-    - 止损: 固定20% (规范硬性约束, 不考虑置信度)
-    - 止盈: 三层 (2x/3x/5x ATR), 仅Level 3后启用
+    核心规则:
+    - 止损(D2): 加仓阶段=Level3极限价; 马丁完成后=均价×0.80
+    - 止盈(D1): 三层 50%/30%/20% (2x/3x/5x ATR), 仅Level 3后启用
     - 加仓间隔: 20日波动率 * 0.5, 最小1%
     - 仓位: 对齐规范的60%/40%/20%总仓位上限
     """
@@ -450,7 +454,7 @@ def run_screen2(
             round(price * (1 + atr_pct * tp_level_2), 2),
             round(price * (1 + atr_pct * tp_level_3), 2),
         ]
-        # 止损: 固定20% (规范硬性约束)
+        # D2: 初始 SL = 入场均价×0.80; 每次加仓后由 recalc_avg_entry 滚动更新
         sl_price = round(price * (1 - stop_loss_pct / 100.0), 2)
     elif screen1.direction == Direction.SHORT:
         tp_levels = [
@@ -498,8 +502,8 @@ def check_exit_signals(
           tp_level_to_close: -1=全平, 0/1/2=关闭对应止盈档位
 
     L1: 技术止盈止损
-      - 止损: 固定20%, 无条件触发
-      - 止盈: 仅Level 3加满后启用, 分三层 (30%/30%/40%)
+      - 止损(D2): 加仓阶段=Level3极限价; 马丁完成后=均价×0.80 (由recalc_avg_entry更新)
+      - 止盈(D1): 仅Level 3加满后启用, 分三层 (50%/30%/20%)
     L2: 信号反转 (连续2根K线确认)
     L3: 风险事件 (单日ATR超正常值3倍)
     L4: 最大回撤约束 (20%强制全平)
@@ -511,7 +515,7 @@ def check_exit_signals(
     low = daily_candle["low"]
     high = daily_candle["high"]
 
-    # --- L1: 技术止损 (固定20%, 无条件触发, 所有层级) ---
+    # --- L1: 技术止损 (无条件触发: 加仓阶段=Level3极限价; 马丁完成后=均价×0.80) ---
     if position.direction == Direction.LONG:
         if low <= position.stop_loss_price:
             return True, ExitReason.STOP_LOSS, -1  # 全平
@@ -666,6 +670,12 @@ def recalc_avg_entry(
     position.size_usd = total_size
     position.total_cost += add_size * taker_fee
     position.level += 1
+
+    # D2: 每次加仓后，止损滚动更新为新均价×0.80 (动态均价止损)
+    if position.direction == Direction.LONG:
+        position.stop_loss_price = round(position.entry_price * 0.80, 2)
+    elif position.direction == Direction.SHORT:
+        position.stop_loss_price = round(position.entry_price * 1.20, 2)
 
     # 检查是否完成全部加仓 (Level 3 = 初始 + 3次加仓)
     if position.level >= 3:
