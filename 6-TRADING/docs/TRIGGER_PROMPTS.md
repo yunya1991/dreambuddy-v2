@@ -251,6 +251,12 @@ Step 1.5c [RE Token 效率监控]（DA + CC 完成后）:
   - 无变化则输出"今日数据无异常变化"（≤50字）
   - 输出: review/efficiency-report.md（最多3条建议）
 
+Step 1.5d [A8 + OE 合并补充]（OE 完成后，与 1.5a 完成后执行）:
+  [A8-theory-practice-verification 补充更新]（非 HARD BLOCK）：
+  - 读取 review/oneirology-report.json 的 compulsive_skip_analysis
+  - 将其追加到 a8-reflection.json 的 bias_audit 段（补充内容，不覆盖已有 bias_audit）
+  - 非 HARD BLOCK：OE 报告不存在时跳过，a8-reflection.json 不受影响
+
 Step 2 [知识库写入]:
   调用 dream-knowledge (K1)：
   - 将本周 Screen1 结论写入 knowledge/strategy_scores/{session_id}.json
