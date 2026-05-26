@@ -1,11 +1,13 @@
 # 6-TRADING SKILL Registry v1.3
 
-> **版本**: v1.3 | **更新日期**: 2026-05-27
+> **版本**: v1.4 | **更新日期**: 2026-05-27
 > **管理原则**: 所有执行均须符合治理基础层（dream-constitution v2.9 + ai-trading-compliance v2.0）约束。
-> **来源说明**: 1-TRADE / 0-CORE / 2-INTEL / 3-SUPPORT = dream-multiskill-v2 | 6-TRADING = 本仓库
+> **来源说明**: 1-TRADE / 0-CORE / 2-INTEL / 3-SUPPORT / 4-GENERIC = dream-multiskill-v2 | 6-TRADING = 本仓库
 > **v1.1**: G1-G6 缺口修复（dream-backtest/bayesian-opt / B3/B4/B5 并行合约 / phase7_contingency）
 > **v1.2**: 集成 5 个 2-INTELLIGENCE SKILL（dream-data-analysis/intelligence-analysis/master-seminar/archive-center/dream-oneirology）
 > **v1.3**: 集成 6 个 3-SUPPORT SKILL（ai-trading-compliance/auto-repair/dream-cost-control/dream-performance-review/resource-efficiency-analyst/dream-operation-director）
+> **v1.3.1**: GAP-A1/A2 fix（G1 集成索引说明补充，D1 新增集成条目）
+> **v1.4**: 集成 1 个 4-GENERIC SKILL（tavily — Phase-0 搜索原语标准化）
 
 ---
 
@@ -65,6 +67,9 @@ graph TD
         K1["dream-knowledge v1.1"]
         MP["master_profiles/"]
     end
+    subgraph TX["基础工具层"]
+        TAV["tavily (TX)"]
+    end
 
     G1 -.->|宪法约束| TA & TB & TC & PD
     G2 -.->|提案合规门禁| PD
@@ -84,6 +89,9 @@ graph TD
     IA -.->|ACH矩阵| B6
     MP -.->|大师档案| MS
     CC -.->|Tavily预算守卫| A1 & A2
+    TAV -.->|P0.1-P0.6 搜索原语| A1
+    TAV -.->|P0.1 价格校验| A2
+    TAV -.->|Breaking news 告警| C1
 
     B1 --> B2
     B2 -->|directive_bias| B3 & B4 & B5
@@ -222,6 +230,18 @@ graph TD
 
 ---
 
+### 基础工具层 — Infrastructure（1个）
+
+**职责**: 为 Team A Phase-0 / Team C 日内监控 / Process D 提供标准化实时网络搜索能力原语。
+
+| ID | SKILL | 来源 | 核心功能 | 使用团队 |
+|----|-------|------|---------|---------|
+| **TX** | **tavily** | **4-GENERIC** | **实时网络搜索（basic/advanced 模式 + news topic + domain 过滤）；Phase-0 P0.1-P0.6 HARD BLOCK 搜索原语；与 CC 预算联动** | **Team A Phase-0 / Team C A6 / Process D D1** |
+
+集成规范: [skills/4-generic-integration/tavily/](../skills/4-generic-integration/tavily/INTEGRATION.md)
+
+---
+
 ## 三、完整执行时序（v1.3）
 
 ```
@@ -342,4 +362,8 @@ graph TD
 
 ---
 
-*最后更新: 2026-05-27 v1.3.1 | GAP-A1/A2 fix: G1 集成索引路径说明补充，新增 D1 集成索引条目 | 维护者: 6-TRADING Claude Code 协作系统*
+| **tavily** | **基础工具层 (TX)** | **4-GENERIC** | [4-generic-integration/tavily/](../skills/4-generic-integration/tavily/INTEGRATION.md) |
+
+---
+
+*最后更新: 2026-05-27 v1.4 | 集成 4-GENERIC tavily SKILL（Phase-0 搜索原语）| 总 SKILL 数: 31 | 维护者: 6-TRADING Claude Code 协作系统*
