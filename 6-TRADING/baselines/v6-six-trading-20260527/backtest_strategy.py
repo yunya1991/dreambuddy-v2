@@ -4,6 +4,11 @@
 ======================
 忠实实现 TRADING_WORKFLOW_SPEC_v1.md 设计规范
 
+v9.0 — Level3加满后启用均价止损 (防整链亏损):
+  1. is_martin_complete 时设置 stop_loss_price = avg_entry×0.80 (LONG) / ×1.20 (SHORT)
+  2. check_exit_signals L1-SL 仅在 is_martin_complete 且 stop_loss_price>0 时触发
+  3. 未加满前无固定SL, 仍靠信号反转/回撤出场
+
 v8.0 — 用户马丁经验规则 (个人实战优化):
   1. 加仓间隔: 每跌 addon_gap_pct%×vol_mult 加一次仓 (复利计算, BTC=8%, SOL/ETH按波动率放大)
   2. 止盈: 均价+tp_pct%×vol_mult 一次全平 (BTC=4%, SOL/ETH按波动率放大), 无分批
@@ -142,6 +147,7 @@ class Position:
     level: int = 0                   # 马丁层级 0=初始, 1-3=加仓
     add_on_levels: List[float] = field(default_factory=list)
     tp_target: float = 0.0           # v8.0: 单次全仓止盈目标 (随均价滚动更新)
+    stop_loss_price: float = 0.0     # v9.0: 均价止损 (仅 Level3加满后启用, 默认0=未激活)
     highest_equity: float = 0.0
     entry_date: str = ""
     signal_strength: SignalStrength = SignalStrength.NONE
@@ -669,11 +675,12 @@ def check_exit_signals(
 
     返回: (should_exit, exit_reason, -1)  — v8.0 全部为全仓平仓 (-1)
 
-    L1: TP目标触及 (均价+tp_pct%×vol_mult) → 全平
-    L2: Screen1 方向明确反转 (LONG→SHORT 或 SHORT→LONG)
-    L4: 最大回撤约束 (20%强制全平)
+    L1a: TP目标触及 (均价+tp_pct%×vol_mult) → 全平
+    L1b: 均价止损 (仅 Level3加满后; avg×0.80/×1.20) → 全平
+    L2:  Screen1 方向明确反转 (LONG→SHORT 或 SHORT→LONG)
+    L4:  最大回撤约束 (20%强制全平)
 
-    已移除: L1-SL(固定止损), L1b(移动止盈), L3(风险事件/ATR扩张)
+    已移除: L1-固定SL(未加满时无SL), L1c(移动止盈), L3(风险事件/ATR扩张)
     """
     if position.direction == Direction.WAIT:
         return False, ExitReason.NONE, -1
@@ -681,12 +688,19 @@ def check_exit_signals(
     high = daily_candle["high"]
     low = daily_candle["low"]
 
-    # --- L1: 单次全仓止盈 (tp_target 触发) ---
+    # --- L1a: 单次全仓止盈 (tp_target 触发) ---
     if position.tp_target > 0:
         if position.direction == Direction.LONG and high >= position.tp_target:
             return True, ExitReason.TAKE_PROFIT_1, -1
         elif position.direction == Direction.SHORT and low <= position.tp_target:
             return True, ExitReason.TAKE_PROFIT_1, -1
+
+    # --- L1b: 均价止损 (v9.0: 仅 Level3加满后激活, stop_loss_price=avg×0.80/×1.20) ---
+    if position.is_martin_complete and position.stop_loss_price > 0:
+        if position.direction == Direction.LONG and low <= position.stop_loss_price:
+            return True, ExitReason.STOP_LOSS, -1
+        elif position.direction == Direction.SHORT and high >= position.stop_loss_price:
+            return True, ExitReason.STOP_LOSS, -1
 
     # --- L2: Screen1 方向明确反转 ---
     if position.screen1 and screen1.direction != Direction.WAIT:
@@ -799,3 +813,8 @@ def recalc_avg_entry(
     # 马丁完成统计 (Level 3 = 初始 + 3次加仓)
     if position.level >= 3:
         position.is_martin_complete = True
+        # v9.0: Level3加满后激活均价止损 (防整链全亏)
+        if position.direction == Direction.LONG:
+            position.stop_loss_price = round(position.entry_price * 0.80, 2)
+        elif position.direction == Direction.SHORT:
+            position.stop_loss_price = round(position.entry_price * 1.20, 2)
