@@ -52,18 +52,29 @@
 
 ### 2.4 Gate C (B6 dream-pretrade-gatekeeper) 注入
 
-在 Gate C 裁决前执行简化 ACH 矩阵：
+在 Gate C 裁决前执行 ACH 矩阵，并读取 `red_team_flag` 动态调整阈值：
 
 ```
 [ACH竞争性假设 — IA-GC]
+输入读取: 读取 sessions/{最新Screen1_id}/team-a/screen1/strategy-type.json 的 red_team_flag
+
 假设A: 入场信号有效（主假设）
 假设B: 入场信号为虚假信号（竞争假设）
+
 诊断性证据（来自 B3 scores_result）:
 ① 资金费率方向是否与入场方向一致？（诊断性：高）
 ② Screen1 btc_price_basis 偏差是否 <5%？（诊断性：高）
 ③ A7 gate score 是否 >30/40？（诊断性：中）
-→ 若假设B的诊断证据数量 ≥ 假设A → Gate C 自动降级为 SKIP
-→ 将 ACH 摘要写入 gate-c/pretrade-check.json 的 ach_summary 字段
+
+red_team_flag 影响:
+→ red_team_flag = true：将 Gate C 通过阈值从 composite_confidence > 60 提高到 > 70
+   （上周 A3 已标记反向风险，本次入场需更高信心才可通过）
+→ red_team_flag = false 或文件不存在：使用默认阈值 composite_confidence > 60
+
+裁决规则:
+→ 若假设B的高诊断证据数量 ≥ 假设A → 自动降级为 SKIP
+→ 将 ACH 摘要写入 gate-c/pretrade-check.json 的 ach_summary 字段，包含:
+   { "red_team_flag_applied": true/false, "threshold_used": 60/70, "ach_result": "PASS/SKIP" }
 ```
 
 ### 2.5 Process D (A8) 注入
@@ -85,12 +96,29 @@
 | A1 | `[BIAS_FLAG]` 标记 | `sessions/{id}/team-a/screen1/raw/a1-contradiction.md` |
 | A2 | `[BIAS_FLAG]` 标记 | `sessions/{id}/team-a/screen1/raw/a2-first-principles.md` |
 | A3 | `[RED_TEAM_ANALYSIS]` + `red_team_flag` | `a3-simulation.md` + `strategy-type.json` |
-| Gate C | `ach_summary` 字段 | `sessions/{id}/gate-c/pretrade-check.json` |
+| Gate C | `ach_summary` (含 `red_team_flag_applied`, `threshold_used`) | `sessions/{id}/gate-c/pretrade-check.json` |
 | A8 | `bias_audit` 字段 | `sessions/{id}/review/a8-reflection.json` |
 
 ---
 
-## 四、核心偏见参考（7大高频偏见）
+## 四、red_team_flag 完整流转链
+
+```
+A3 (dream-strategy-designer)
+  → 红队论据强度 > 40%
+  → 写入 strategy-type.json: { red_team_flag: true }
+        ↓
+master-seminar (MS)
+  → red_team_flag=true → 强化4阵营辩论模式
+        ↓
+Gate C (B6, IA-GC)
+  → 读取 red_team_flag → 将通过阈值从 60 升至 70
+  → ach_summary.red_team_flag_applied: true
+```
+
+---
+
+## 五、核心偏见参考（7大高频偏见）
 
 | 偏见 | 场景 | 缓解工具 |
 |------|------|---------|
@@ -104,4 +132,4 @@
 
 ---
 
-*最后更新: 2026-05-26*
+*最后更新: 2026-05-26 v1.1 | 修复 GAP-H4: red_team_flag 完整流转链（A3→MS→Gate C）*
