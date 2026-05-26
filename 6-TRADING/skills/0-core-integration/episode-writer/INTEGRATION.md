@@ -42,7 +42,13 @@
     "stop_loss": null,
     "take_profit_1": null,
     "take_profit_2": null,
-    "slippage_bps": null
+    "slippage_bps": null,
+    "fee_usdt": null,
+    "fee_rate_bps": null,
+    "slippage_usdt": null,
+    "delay_cost_usdt": null,
+    "total_cost_usdt": null,
+    "cost_rate_pct": null
   },
   "outcome": {
     "exit_price": null,
