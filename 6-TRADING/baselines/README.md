@@ -12,6 +12,30 @@
 | [v0](v0-crypto-signal-bot-20260526/) | crypto-signal-bot | 1H 信号跟踪 | +8.78% / 0.715 Sharpe | +68.68% / 3.022 Sharpe | -8.67% / -0.336 Sharpe | 2026-05-26 |
 | [v1](v1-six-trading-system-20260526/) | 6-TRADING 三屏马丁 v3.1 | 1D+1W 趋势马丁 | -6.42% / -1.29 Sharpe | -12.65% / -1.82 Sharpe | -11.66% / -1.65 Sharpe | 2026-05-26 |
 | [v2](v2-six-trading-20260526/) | 6-TRADING 三屏马丁 v4.0 | 1D+1W + 形态识别 | -3.37% / -1.58 Sharpe | -6.01% / -2.25 Sharpe | -4.94% / -1.79 Sharpe | 2026-05-26 |
+| [v3](v3-six-trading-20260526/) | 6-TRADING v5.0 | 1D+1W + 价格动量熊市门禁 | -7.00% / — | -5.37% / — | -5.29% / — | 2026-05-26 |
+| [v4](v4-six-trading-20260526/) | 6-TRADING v6.0 | 1D+1W + 双向马丁(Option C) | -4.35% / -1.09 Sharpe | -4.23% / -1.47 Sharpe | -2.61% / -0.47 Sharpe | 2026-05-26 |
+| [v5](v5-six-trading-20260526/) | 6-TRADING v7.0 | 1D+1W + 动态HV阈值 + 加仓抑制 | -4.35% / -1.09 Sharpe | -2.17% / -1.07 Sharpe | -0.51% / -0.17 Sharpe | 2026-05-26 |
+
+---
+
+## v4 vs v5 (v7.0) 改进摘要
+
+| 指标 | v4 BTC | v5 BTC | v4 SOL | v5 SOL | v4 ETH | v5 ETH |
+|------|--------|--------|--------|--------|--------|--------|
+| 总收益率 | -4.35% | -4.35% | -4.23% | **-2.17%** ↑ | -2.61% | **-0.51%** ↑ |
+| 最大回撤 | 6.7% | 6.7% | 6.1% | **4.1%** ↓ | 7.4% | **5.7%** ↓ |
+| 夏普比率 | -1.09 | -1.09 | -1.47 | **-1.07** ↑ | -0.47 | **-0.17** ↑ |
+| 最终权益 | $9,565 | $9,565 | $9,577 | **$9,783** ↑ | $9,739 | **$9,949** ↑ |
+
+**v7.0 改进点**：
+1. `_calc_quarterly_vol_mult()` — 13周滚动HV替代静态表，静态值作为下限防止冷启动
+2. `ADDON_SUPPRESS_THRESHOLDS` — 加仓抑制阈值按代币波动率分档 (BTC/ETH/SOL)
+3. `run_screen1/run_screen2` 均接受 `inst_id` 参数
+
+**v7.0 诊断说明**：
+- Opt-2 (RSI+ATR 加仓抑制) 在熊市测试期未触发 (RSI 从未超过阈值 + ATR 扩张未叠加)
+- Opt-2 预计在牛市测试期有效，待 2024-11~2025-05 验证
+- BTC 未改进原因: v7.0 对 BTC vol_mult=1.0 无变化
 
 ---
 
@@ -90,4 +114,8 @@ python six_trading_backtest.py
 # v2 基线 (6-TRADING v4.0, 1D + regime detection)
 cd 6-TRADING/baselines/v2-six-trading-20260526/
 python six_trading_backtest.py  # (需配合 backtest_engine_main.py)
+
+# v5 基线 (6-TRADING v7.0, 动态HV + 加仓抑制)
+cd 6-TRADING/baselines/v5-six-trading-20260526/
+python ../../scripts/six_trading_backtest.py  # 需引擎和数据获取器在同目录
 ```
