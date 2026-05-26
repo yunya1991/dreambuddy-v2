@@ -1,0 +1,316 @@
+# 6-TRADING Claude Code 协作方案 v1.0
+
+> **文档定位**: 本文档是 Claude Code 协作系统的**源文件**，Claude 的记忆文件从此处同步。
+>
+> **更新规则**: 修改此文档 → 告知 Claude "同步记忆" → Claude 读取此文档更新记忆系统。
+>
+> **版本**: v1.0 | 创建日期: 2026-05-26
+
+---
+
+## 一、系统概述
+
+### 1.1 设计目标
+
+构建一个由 Claude Code 驱动的 6-TRADING 自动化协作系统，实现：
+- **定期执行**：通过 CronCreate 定时触发三屏分析
+- **多 Agent 协作**：并行子代理分别执行 A1/A2/A3 研究
+- **结构化输出**：每次研究产出标准 session 文件夹
+- **状态持久化**：关键状态写入 Claude 记忆跨会话保留
+- **渐进代码化**：SKILL 先行，稳定后逐步代码化
+
+### 1.2 与 DREAM-AGENT 的关系（方案 C）
+
+DREAM-AGENT 系统作为 6-TRADING **开发治理系统**，而非运行时驱动器：
+- DREAM-AGENT 负责：新 SKILL 开发、A 系列迭代、跨 SKILL 接口变更（走 Phase 0-8）
+- 6-TRADING 负责：实时执行 A0-A9，独立自驱
+
+---
+
+## 二、三团队分工
+
+### Team A — 研究预设（Screen 1 + Screen 2）
+
+| 屏 | 周期 | 使用 SKILL | 输出 |
+|----|------|-----------|------|
+| Screen 1 | 周线 | dream-screen1-first | 方向 + 合约/现货马丁选择 |
+| Screen 2 | 日线 | dream-screen2-second | 三大预设（入场/加仓/TP-SL） |
+
+**执行方式**：
+- Screen 1：并行启动 3 个子 Agent（A1/A2/A3），主 Agent 综合输出
+- Screen 2：顺序执行 A1→A2→A3（基于 Screen 1 方向约束），计算马丁阶梯
+
+**触发时机**：
+- Screen 1：每周日 20:00（CronCreate）
+- Screen 2：每工作日 07:30（CronCreate）
+
+---
+
+### Team B — 实时执行层（Screen 3 完整接管）
+
+**完整流水线**：
+```
+读 Screen 2 presets
+  → A7 门禁（SKILL: A7-practice-theory）
+    → BLOCK → 中止，写入 team-b/a7-gate.json
+  → A4 实时验证（scripts/a4_validation_executor.py）
+    → FAIL → 等待，不执行
+  → Gate C（skills/dream-pretrade-gatekeeper/pretrade_gatekeeper.py）
+    → BLOCK → 中止，写入 gate-c/pretrade-check.json
+  → A5 下单（scripts/dream_trade_exec.py）
+    → 写入 team-b/execution-log.md
+  → 开启 A6 监控 + A9 止损循环
+    → A6 加仓信号 → 追加 team-b/a6-events.jsonl
+    → A9 离场信号 → 写入 team-b/a9-exit.json
+```
+
+**触发时机**：每工作日 09:00 状态检查（CronCreate）
+
+---
+
+### Gate C — 代码级执行门禁（独立检查点）
+
+- 文件：`6-TRADING/skills/dream-pretrade-gatekeeper/pretrade_gatekeeper.py`
+- 在 Team B A5 下单前同步运行
+- 输出 PASS/BLOCK + reason_codes
+- **硬约束**：BLOCK 必须中止，不可绕过
+
+---
+
+### Process D — 复盘（A8 驱动）
+
+- 触发：每周一 06:00（CronCreate）
+- 读取上周所有 sessions/ 的 session-summary.md
+- 执行 A8（A8-theory-practice-verification SKILL）
+- 输出 review/a8-reflection.md + Screen 1 参数调整建议
+
+---
+
+## 三、会话文件夹规范
+
+### 3.1 路径规则
+
+```
+6-TRADING/sessions/{YYYYMMDD}-{SYMBOL}-{TRIGGER}/
+```
+
+TRIGGER 取值：`SCREEN1` / `SCREEN2` / `TEAMB` / `REVIEW`
+
+### 3.2 目录结构
+
+```
+sessions/
+  _template/                     ← 模板目录（不做实际交易）
+  20260526-BTC-SCREEN1/
+    meta.json                    ← 会话元数据（状态机）
+    team-a/
+      screen1/
+        weekly-direction.md      ← 周线综合研判
+        strategy-type.json       ← {type, direction, score, valid_until}
+        raw/
+          a1-contradiction.md    ← A1 原始输出
+          a2-first-principles.md ← A2 原始输出
+          a3-simulation.md       ← A3 原始输出
+      screen2/
+        daily-presets.json       ← 三大预设结构化数据
+        martingale-grid.json     ← 阶梯计算参数
+        order-plan.md            ← 可读版预设表（人工 review 用）
+        raw/                     ← A1/A2/A3 日线原始输出
+    team-b/
+      a7-gate.json               ← {result: PASS/BLOCK, reason, timestamp}
+      a4-validation.json         ← A4 验证结果
+      execution-log.md           ← A5 执行记录
+      position-state.json        ← 当前仓位状态快照
+      a6-events.jsonl            ← A6 监控事件流（append-only）
+      a9-exit.json               ← A9 离场决策
+    gate-c/
+      pretrade-check.json        ← {pass, reason_codes, timestamp}
+    review/
+      a8-reflection.md           ← Process D 复盘输出
+    session-summary.md           ← 最终摘要
+```
+
+### 3.3 meta.json 状态机
+
+```json
+{
+  "session_id": "20260526-BTC-SCREEN1",
+  "symbol": "BTC-USDT-SWAP",
+  "trigger": "cron_screen1_weekly",
+  "created_at": "2026-05-26T20:00:00Z",
+  "status": "team_a_complete",
+  "status_flow": [
+    "created → team_a_running → team_a_complete",
+    "→ team_b_running → gate_c_check → executing",
+    "→ monitoring → closed"
+  ],
+  "team_a_complete_at": null,
+  "team_b_started_at": null,
+  "closed_at": null,
+  "screen1_direction": null,
+  "screen2_presets_ready": false
+}
+```
+
+---
+
+## 四、CronCreate 定时任务
+
+| 任务 | Cron | 触发提示词 |
+|------|------|-----------|
+| Screen 1 周线 | `0 20 * * 0` | 见下方模板 |
+| Screen 2 日线 | `30 7 * * 1-5` | 见下方模板 |
+| Team B 检查 | `0 9 * * 1-5` | 见下方模板 |
+| Process D 复盘 | `0 6 * * 1` | 见下方模板 |
+
+### 触发提示词模板
+
+**Screen 1（每周日）**：
+```
+运行 6-TRADING Team A Screen 1 周线分析：
+1. 读取 memory 中 project_trading_session_state 当前状态
+2. 在 6-TRADING/sessions/ 创建 {YYYYMMDD}-BTC-SCREEN1/ 文件夹
+3. 并行启动 3 个子 Agent：A1矛盾分析/A2第一性原理/A3沙盘推演（周线级）
+4. 主 Agent 综合输出 strategy-type.json + weekly-direction.md
+5. 更新 memory 中的 screen1_direction + screen1_valid_until
+```
+
+**Screen 2（每工作日）**：
+```
+运行 6-TRADING Team A Screen 2 日线预设：
+1. 读取 memory 中 screen1_direction，验证 valid_until 是否在有效期
+2. 如过期或 null → 先触发 Screen 1
+3. 在 6-TRADING/sessions/ 创建 {YYYYMMDD}-BTC-SCREEN2/ 文件夹
+4. 顺序执行 A1/A2/A3 日线级（基于 Screen 1 方向约束）
+5. 计算马丁阶梯，输出 daily-presets.json + order-plan.md
+6. 更新 memory 中的 screen2_presets
+```
+
+**Team B（每工作日）**：
+```
+运行 6-TRADING Team B Screen 3 状态检查：
+1. 读取 memory 中 project_trading_session_state
+2. 如 status=no_position 且 screen2_presets 存在 → 执行入场流程（A7→A4→GateC→A5）
+3. 如 status=holding → 执行 A6 监控检查 + A9 止盈止损检查
+4. 所有动作写入当前 session 的 team-b/ 目录
+5. 更新 memory 中的 current_position 状态
+```
+
+**Process D（每周一）**：
+```
+运行 6-TRADING Process D 复盘：
+1. 列出上周 6-TRADING/sessions/ 的所有文件夹
+2. 读取每个 session-summary.md
+3. 执行 A8 理论实践验证 SKILL，生成改进提案
+4. 写入最新 session 的 review/a8-reflection.md
+5. 提炼对 Screen 1 参数的调整建议
+```
+
+---
+
+## 五、多 Agent 协作模式
+
+### Screen 1 并行模式（3 子代理同时运行）
+
+```
+主 Agent
+├── 子 Agent 1: dream-contradiction-theory（A1 周线矛盾分析）
+│     输出 → team-a/screen1/raw/a1-contradiction.md
+├── 子 Agent 2: dream-first-principles（A2 周线第一性原理）
+│     输出 → team-a/screen1/raw/a2-first-principles.md
+└── 子 Agent 3: master-seminar（A3 周线沙盘推演）
+      输出 → team-a/screen1/raw/a3-simulation.md
+          ↓ 三者完成后
+主 Agent 综合 → strategy-type.json + weekly-direction.md
+```
+
+### Screen 2 顺序模式（依赖 Screen 1 输出）
+
+```
+主 Agent 读取 Screen 1 输出
+→ A1(日线) → A2(日线) → A3(日线)
+→ 马丁阶梯计算（based on 20日波动率）
+→ 输出 daily-presets.json
+```
+
+---
+
+## 六、现有代码基础
+
+### 已就绪脚本（scripts/）
+
+| 脚本 | 对应角色 | 状态 |
+|------|---------|------|
+| `a1_research.py` | Team A A1 | ✅ 可用 |
+| `a2_first_principles_v2.6_auto.py` | Team A A2 | ✅ 可用 |
+| `a4_validation_executor.py` | Team B A4 | ✅ 可用 |
+| `a5_guards.py` | Team B A5 门禁 | ✅ 可用 |
+| `dream_trade_exec.py` | Team B A5 执行 | ✅ 可用 |
+| `dream_strategy_pipeline.py` | 总流水线 | ⚠️ 输出路径需改为 sessions/ |
+| `dream_stop_loss_monitor.py` | Team B A9 | ✅ 已修复凭证（v1.1） |
+| `screen1_manual_trigger.py` | Team A Screen 1 参考 | ✅ 可参考 |
+| `okx_cli.py` | OKX 接口封装 | ✅ 标准接口 |
+
+### 缺口（已补全）
+
+| 缺口 | 补全方式 |
+|------|---------|
+| Screen 3 SKILL 定义 | ✅ dream-screen3-third/SKILL.md |
+| sessions/ 目录规范 | ✅ sessions/_template/ |
+| A6 加仓触发（监控中） | 🔄 dream_stop_loss_monitor.py 扩展（Phase 2） |
+
+---
+
+## 七、代码化演进路线
+
+### Phase 1（当前）— SKILL + Claude Code 调度
+
+- 所有分析通过 SKILL 提示词执行
+- Claude Code 读取 SKILL 输出写入 session 文件夹
+- CronCreate 触发定时执行
+- 记忆文件保存跨会话状态
+
+### Phase 2 — 现有代码接管
+
+- `dream_strategy_pipeline.py` 输出路径统一到 `sessions/` 目录
+- `dream_stop_loss_monitor.py` 扩展 A6 加仓触发逻辑
+- Gate C 完整接入执行流程
+- 目标：Team A 的 A1/A2 分析由 Python 脚本执行
+
+### Phase 3 — 补齐缺口
+
+- A6 监控扩展为独立持续运行进程
+- A9 21 事件库触发器代码化
+- Screen 2 Bayesian 优化自动化
+
+### Phase 4 — 全代码化
+
+- A7/Gate C 规则全部代码化（参考 pretrade_gatekeeper.py 模式）
+- dream_strategy_pipeline.py 升级为完整编排器
+- CronCreate 可替换为系统级 cron
+
+---
+
+## 八、操作原则
+
+1. **SKILL 先行，代码后跟**：新流程先用 SKILL 跑通，稳定后再代码化
+2. **Session 文件夹是真相来源**：任何分析结果必须写入文件夹，不依赖对话上下文
+3. **记忆文件是跨会话状态**：仅存持仓方向、Screen1 研判等；per-session 数据在文件夹
+4. **Gate 是硬约束**：A7 BLOCK 和 Gate C BLOCK 必须中止，不可绕过
+5. **凭证统一走 `~/.okx/config.toml`**：禁止硬编码凭证到代码文件
+
+---
+
+## 九、Claude 记忆文件索引
+
+| 记忆文件 | 内容 | 更新时机 |
+|---------|------|---------|
+| `project_trading_system_design.md` | 设计决策、分工、代码化路线 | 方案变更时 |
+| `project_trading_session_state.md` | 当前持仓方向、Screen1研判、马丁层级 | 每次 Team A/B 执行后 |
+| `reference_trading_cron_jobs.md` | CronCreate Job ID + 触发提示词 | 创建/删除定时任务时 |
+
+**同步规则**：修改此文档后，告知 Claude "同步记忆" 即可更新上述 3 个记忆文件。
+
+---
+
+> **文档维护**: 此文档由 Claude Code 生成并维护。变更需通过 PR 合入 main 分支。
