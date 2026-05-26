@@ -138,8 +138,7 @@ python scripts/okx_cli.py --profile paper balance
 # 检查端口占用
 lsof -i :3847
 
-# 启动
-cd /Users/zhangjiangtao/WorkBuddy/dreambuddy-v1/6-TRADING
+# 启动（在 6-TRADING 目录下）
 python bridge/run_server.py
 
 # 健康检查
@@ -155,9 +154,7 @@ curl http://127.0.0.1:3847/health
 ### Q13: 如何运行回测？
 
 ```bash
-cd /Users/zhangjiangtao/WorkBuddy/dreambuddy-v1/6-TRADING
-
-# 运行回测（200U初始资金）
+# 运行回测（200U初始资金，在 6-TRADING 目录下）
 python scripts/backtest_engine.py
 
 # 输出: reports/backtest_result_v2.json
@@ -219,7 +216,7 @@ python scripts/okx_cli.py --profile paper ticker BTC-USDT-SWAP
 env | grep -E "TAVILY|OKX|BAILIAN"
 
 # 自动化任务状态
-# 在WorkBuddy中使用 /tasks 命令查看
+# 使用 /tasks 命令查看（在 Claude Code 中）
 ```
 
 ### Q20: 如何查看记忆系统？
