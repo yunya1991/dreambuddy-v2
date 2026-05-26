@@ -109,8 +109,10 @@ glassnode.com, research.binance.com
 | CC 状态 | tavily 行为 |
 |---------|-----------|
 | `用量 >= 95%` | 全部停止，输出 `SCREEN_BLOCKED_BUDGET` |
-| `用量 >= 85%` | P0.4b (P0.4b) 降级跳过；P0.4 降级为 basic 模式 |
+| `用量 >= 85%` | **仅** P0.4b 降级跳过（archive_data:"budget_limited"）；P0.1-P0.6 其余步骤维持原模式正常执行 |
 | `用量 < 85%` | 按矩阵正常执行 |
+
+> **权威来源**: TRIGGER_PROMPTS.md §二 CC 前置规则（本文件与其保持一致，以触发提示词为准）
 
 **预算记账规则**（CC 记录）:
 - 每次 tavily SKILL 调用前，CC 先检查 `daily_tavily_calls` 计数器
@@ -196,4 +198,4 @@ TAVILY_API_KEY 存储于 Claude Code 环境变量或 Clawdbot config
 
 ---
 
-*最后更新: 2026-05-27 v1.0 | 集成 tavily 4-GENERIC SKILL | 维护者: 6-TRADING Claude Code 协作系统*
+*最后更新: 2026-05-27 v1.1 | GAP-TA3 fix: 85% 规则对齐 TRIGGER_PROMPTS 权威来源（仅 P0.4b 降级）| 维护者: 6-TRADING Claude Code 协作系统*
