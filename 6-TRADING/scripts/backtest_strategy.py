@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-回测策略实现模块 v3.1
+回测策略实现模块 v4.0
 ======================
 忠实实现 TRADING_WORKFLOW_SPEC_v1.md 设计规范
+
+v4.0 市场状态增强 (v2改进):
+  1. Screen1 熊市强制覆盖: 周线收盘低于EMA50×0.95 → 强制空头
+  2. 新增 detect_market_regime(): 5档市场状态识别, 输出仓位乘数
+  3. Screen1Output 新增 regime/regime_multiplier 字段
+  4. Screen2 仓位计算引入 regime_multiplier (倍数缩放)
+  5. TP倍数收窄: 0.8x/1.5x/2.5x ATR (原 2x/3x/5x)
 
 v3.1 规范对齐修正 (D1/D2):
   D1. 分批止盈比例: 50%→30%→20% (原 30%/30%/40%)
@@ -12,9 +19,9 @@ v3.0 基础修正 (完全对齐规范):
   1. 止损: 固定20% (基于入场价), 不再使用ATR倍数
   2. 加仓: 等额加仓 (不再递减)
   3. 止盈: 仅Level 3加满后启用 (不再Level 2即可)
-  4. 离场: 分批止盈 30%/30%/40% (不再一次性全平)
+  4. 离场: 分批止盈 50%/30%/20% (不再一次性全平)
   5. 仓位: 对齐规范 强多头60%/弱多头40%/观望20% 总仓位上限
-  6. 止盈: 三层TP (2x/3x/5x ATR), 渐进锁利
+  6. 止盈: 三层TP (ATR倍数), 渐进锁利
 
 第一屏 (周线): 方向判断 + 策略类型选择 + 仓位上限
 第二屏 (日线): 信号强度评估 + 四类订单设置
@@ -76,6 +83,8 @@ class Screen1Output:
     macd_signal: str
     market_state: str = "观望"
     position_limit_pct: float = 0.20    # 总仓位上限: 20%/40%/60%
+    regime: str = "CONSOLIDATION"       # 市场形态: STRONG_BULL/WEAK_BULL/CONSOLIDATION/WEAK_BEAR/STRONG_BEAR
+    regime_multiplier: float = 0.5      # 仓位乘数: 0.5(震荡) / 0.75(弱趋势) / 1.0(强趋势)
 
 
 @dataclass
@@ -143,10 +152,10 @@ DEFAULT_STRATEGY_PARAMS = {
     # 第二屏参数
     "level_spacing_k": 0.5,           # 加仓间隔系数 (波动率 * 0.5, 最小1%)
 
-    # 止盈参数 (ATR倍数)
-    "tp_level_1": 2.0,                # 第一档止盈 ATR倍数 (平30%)
-    "tp_level_2": 3.0,                # 第二档止盈 ATR倍数 (平30%)
-    "tp_level_3": 5.0,                # 第三档止盈 ATR倍数 (平40%)
+    # 止盈参数 (ATR倍数) — v4.0 收窄: 0.8x/1.5x/2.5x (原 2x/3x/5x)
+    "tp_level_1": 0.8,                # 第一档止盈 ATR倍数 (平50%) ≈ +1.6% @ BTC
+    "tp_level_2": 1.5,                # 第二档止盈 ATR倍数 (平30%) ≈ +3%
+    "tp_level_3": 2.5,                # 第三档止盈 ATR倍数 (平20%) ≈ +5%
 
     # 止损: 20% 为基准 (加仓阶段=Level3保护; 马丁完成后=均价×0.80)
     "stop_loss_pct": 20.0,            # 止损百分比基准 (不可优化覆盖)
@@ -169,6 +178,66 @@ def _apply_opt_params(defaults: dict, overrides: dict = None) -> dict:
 # ==================== 分批止盈比例 (规范) ====================
 
 TP_RATIOS = [0.50, 0.30, 0.20]  # 第一档50%, 第二档30%, 第三档20% (规范: 50%→30%→20%)
+
+
+# ==================== 市场形态识别 ====================
+
+def detect_market_regime(
+    weekly_candles: List[Dict],
+    weekly_idx: int,
+) -> Tuple[str, float]:
+    """
+    市场状态识别 (5档), 返回 (regime_name, position_multiplier)
+
+    Regimes:
+      STRONG_BULL  — EMA20>EMA50 >3%, MACD hist>0且增长, RSI 50-75  → 1.0
+      WEAK_BULL    — EMA20>EMA50 0-3%, 或混合多头信号               → 0.75
+      CONSOLIDATION— |EMA20-EMA50|/EMA50 <0.5%, ATR/close <2%       → 0.5
+      WEAK_BEAR    — EMA20<EMA50 0-3%, 或 MACD hist<0               → 0.75
+      STRONG_BEAR  — EMA20<EMA50 >3%, 或 close<EMA50×0.95           → 1.0
+    """
+    if weekly_idx < 1:
+        return "CONSOLIDATION", 0.5
+
+    curr = weekly_candles[weekly_idx]
+    prev = weekly_candles[weekly_idx - 1]
+
+    ema20     = curr.get("ema20")
+    ema50     = curr.get("ema50")
+    curr_hist = curr.get("macd_hist")
+    prev_hist = prev.get("macd_hist")
+    rsi       = curr.get("rsi")
+    atr_val   = curr.get("atr") or 0
+    close_val = curr.get("close") or 1
+
+    if not ema20 or not ema50:
+        return "CONSOLIDATION", 0.5
+
+    ema_diff_pct = (ema20 - ema50) / ema50 * 100  # 正=多, 负=空
+
+    # STRONG_BEAR: EMA20 < EMA50 超3%, 或收盘低于 EMA50×0.95
+    if ema_diff_pct < -3.0 or close_val < ema50 * 0.95:
+        return "STRONG_BEAR", 1.0
+
+    # STRONG_BULL: EMA20>EMA50 超3% + MACD hist>0 且增长 + RSI 50-75
+    macd_growing = (curr_hist is not None and prev_hist is not None
+                    and curr_hist > 0 and curr_hist > prev_hist)
+    rsi_ok = rsi is not None and 50 <= rsi <= 75
+    if ema_diff_pct > 3.0 and macd_growing and rsi_ok:
+        return "STRONG_BULL", 1.0
+
+    # CONSOLIDATION: |diff| <0.5% + ATR/close <2% (波动率压缩)
+    if abs(ema_diff_pct) < 0.5:
+        atr_ratio = atr_val / close_val if close_val > 0 else 0
+        if atr_ratio < 0.02:
+            return "CONSOLIDATION", 0.5
+
+    # WEAK_BEAR: EMA20<EMA50 (0-3%), 或 MACD hist<0
+    if ema_diff_pct < 0 or (curr_hist is not None and curr_hist < 0):
+        return "WEAK_BEAR", 0.75
+
+    # WEAK_BULL: EMA20>EMA50 (0-3%), 或混合信号
+    return "WEAK_BULL", 0.75
 
 
 # ==================== 第一屏: 周线决策 ====================
@@ -204,6 +273,8 @@ def run_screen1(
             macd_signal="none",
             market_state="观望",
             position_limit_pct=0.20,
+            regime="CONSOLIDATION",
+            regime_multiplier=0.5,
         )
 
     params = _apply_opt_params(DEFAULT_STRATEGY_PARAMS, opt_params)
@@ -213,6 +284,7 @@ def run_screen1(
 
     curr = weekly_candles[current_idx]
     prev = weekly_candles[current_idx - 1]
+    regime, regime_multiplier = detect_market_regime(weekly_candles, current_idx)
     score = 50.0
     ema_trend = "neutral"
     macd_signal = "none"
@@ -264,8 +336,14 @@ def run_screen1(
 
     score = max(0, min(100, score))
 
-    # 方向判断 (严格对齐规范)
-    if score <= short_threshold:
+    # 方向判断 (v4.0: 熊市强制覆盖 + 评分分支)
+    ema50_val = curr.get("ema50")
+    if ema50_val and curr["close"] < ema50_val * 0.95:
+        # Hard override: 周价低于EMA50超5% → 强制空头 (不受评分影响)
+        direction = Direction.SHORT
+        market_state = "强制空头(EMA50跌破5%)"
+        position_limit = 0.60
+    elif score <= short_threshold:
         direction = Direction.SHORT
         market_state = "空头"
         position_limit = 0.60
@@ -298,6 +376,8 @@ def run_screen1(
         macd_signal=macd_signal,
         market_state=market_state,
         position_limit_pct=position_limit,
+        regime=regime,
+        regime_multiplier=regime_multiplier,
     )
 
 
@@ -427,7 +507,7 @@ def run_screen2(
         SignalStrength.NONE: 0.2,
     }.get(signal_strength, 0.2)
 
-    effective_total = total_limit * strength_mult
+    effective_total = total_limit * strength_mult * screen1.regime_multiplier
     single_layer_pct = effective_total / 4.0  # 等额分4层
 
     # 加仓阶梯 (规范: 20日波动率 * 0.5, 最小1%)
@@ -644,7 +724,7 @@ def calc_partial_close(
     tp_level: int
 ) -> float:
     """
-    计算分批止盈的平仓数量 (规范: 30%/30%/40%)
+    计算分批止盈的平仓数量 (规范: 50%/30%/20%)
 
     tp_level: 0=第一档, 1=第二档, 2=第三档
     返回: 要平仓的USD数量
