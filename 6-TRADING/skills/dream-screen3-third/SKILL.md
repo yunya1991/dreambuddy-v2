@@ -1,5 +1,5 @@
 ---
-title: "第三屏: 实时执行层 SKILL v1.0"
+title: "第三屏: 实时执行层 SKILL v1.1"
 summary: "三屏交易体系执行层 - A7门禁→A4验证→A5入场→A6监控→A9离场 完整闭环"
 trigger:
   - "第三屏"
@@ -12,7 +12,7 @@ trigger:
   - "紧急离场"
   - "Screen 3"
 version: "1.0"
-updated: "2026-05-26"
+updated: "2026-05-27"
 depends:
   - dream-screen2-second
   - A7-practice-theory
@@ -31,7 +31,7 @@ depends:
 >
 > **执行周期**: 由 CronCreate 每工作日 09:00 检查触发，持仓期持续监控
 >
-> **版本**: v1.0 | 创建日期: 2026-05-26
+> **版本**: v1.1 | 创建日期: 2026-05-26 | 更新日期: 2026-05-27
 
 ---
 
@@ -64,7 +64,7 @@ depends:
 | 原则 | 说明 |
 |------|------|
 | ✅ 以第二屏预设为参考基准 | 不独立判断方向，基于预设调整 |
-| ✅ A7 门禁为首要前置检查 | A7 BLOCK 则整体中止，不绕过 |
+| ✅ A7 门禁为首要前置检查 | A7 SKIP 则整体中止，不绕过 |
 | ✅ Gate C 为最后代码门禁 | 硬规则检查，BLOCK 则不下单 |
 | ✅ A6+A9 持仓期持续运行 | 不间断监控，实时调整止盈止损 |
 | ❌ 不独立判断方向 | 方向来自第一屏 |
@@ -95,7 +95,7 @@ depends:
 │          ▼                         ▼                        │
 │  【入场流程】                  【监控流程】                   │
 │  Phase 1: A7 门禁              Phase 4: A6 监控检查          │
-│    ↓ BLOCK → 中止               ↓ 加仓信号 → 执行加仓        │
+│    ↓ SKIP → 中止                ↓ 加仓信号 → 执行加仓        │
 │  Phase 2: A4 验证              Phase 5: A9 止盈止损检查      │
 │    ↓ FAIL → 等待                ↓ 离场信号 → 执行离场        │
 │  Phase 3: Gate C 门禁                                       │
@@ -155,15 +155,15 @@ Phase 1: A7 门禁
     → 写入 team-b/a7-gate.json: {result: "PASS"}
     → 继续 Phase 2
 
-  输出 BLOCK:
-    → 写入 team-b/a7-gate.json: {result: "BLOCK", reason: "..."}
+  输出 SKIP:
+    → 写入 team-b/a7-gate.json: {result: "SKIP", reason: "..."}
     → 整体中止，不进行后续步骤
-    → 更新 session meta.json status = "a7_blocked"
+    → 更新 session meta.json status = "a7_skipped"
     → 提示: 需重新运行第二屏 Screen 2
 
   a7-gate.json 格式:
     {
-      "result": "PASS | BLOCK",
+      "result": "PASS | SKIP",
       "reason": "理论实践一致/不一致说明",
       "market_state": "当前市场状态简述",
       "timestamp": "ISO8601"
@@ -217,7 +217,7 @@ Phase 2: A4 实时验证
 
 ### 2.5 Phase 3: Gate C 代码门禁
 
-> **使用脚本**: `skills/dream-pretrade-gatekeeper/pretrade_gatekeeper.py`（已有）
+> **使用脚本**: `skills/dream-pretrade-gatekeeper/scripts/pretrade_gatekeeper.py`（已有）
 >
 > **定位**: 硬规则代码检查，所有软性判断已在 A7/A4 完成
 
@@ -232,7 +232,7 @@ Phase 3: Gate C 代码门禁
     - account_snapshot（账户快照：回撤、dream_mode）
 
   执行:
-    python skills/dream-pretrade-gatekeeper/pretrade_gatekeeper.py
+    python skills/dream-pretrade-gatekeeper/scripts/pretrade_gatekeeper.py
 
   输出 PASS:
     → 写入 gate-c/pretrade-check.json: {pass: true, reason_codes: []}
@@ -314,7 +314,13 @@ Phase 3.5: A5 入场下单
 ```yaml
 Phase 4: A6 实时监控
   ────────────────────────────────────────────────────────
-  触发: 每次 Team B 检查周期（工作日 09:00 CronCreate）
+  触发频率:
+    正常状态: 每小时运行
+    异常状态: 每15分钟运行（价格偏离>3% 或 波动率翻倍）
+    紧急状态: 实时监控（21事件库触发）
+  Phase 1 当前限制: 每工作日 09:00 CronCreate 入口触发，
+    持仓期 A6 子检查在同一周期内重复执行；
+    Phase 3 代码化后升级为 dream_stop_loss_monitor.py 持续运行。
   定位: 持仓期间实时监控，识别加仓时机
 
   监控维度:
@@ -374,11 +380,15 @@ Phase 5: A9 止盈止损 + 离场决策
     → 强制立即离场，不等待
 
   【L4】参数优化层
-    账户最大回撤超阈值
     时间止损（持仓超周期未达目标）
     波动率异常（HV/IV 急剧变化）
 
-  离场优先级: L1 < L2 < L3（L3 最高优先级）
+  ★ 最大回撤硬性止损（独立于四层，优先于一切）:
+    回撤计算: (当前权益 - 历史最高权益) / 历史最高权益
+    回撤 ≥ 20%: 强制全部平仓，不等待任何 L1-L4 信号
+    触发后: 更新 status = "emergency_closed"，写入 a9-exit.json
+
+  离场优先级: L1 < L2 < L3 < L4 < 最大回撤强制止损
 
   离场执行:
     分批离场: 50% → 30% → 20%（L1止盈）
@@ -513,4 +523,4 @@ DREAM-AGENT 的介入时机：
 ---
 
 > **文档维护**: 稳定运行后，Phase 1（A7）和 Phase 3（Gate C）规则将逐步代码化。
-> 参考: `skills/dream-pretrade-gatekeeper/pretrade_gatekeeper.py` 的代码化模式。
+> 参考: `skills/dream-pretrade-gatekeeper/scripts/pretrade_gatekeeper.py` 的代码化模式。
