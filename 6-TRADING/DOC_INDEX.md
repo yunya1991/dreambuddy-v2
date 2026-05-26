@@ -19,11 +19,12 @@
 
 ## 一、交易系统SKILL
 
-### 1.1 核心交易SKILL (22个)
+### 1.1 核心交易SKILL (23个)
 
 | SKILL | A系 | 路径 | 职责 |
 |:------|:----|:-----|:-----|
 | dream-systematic-trading | - | `skills/dream-systematic-trading/` | **三屏交易总入口SKILL** |
+| dream-screen3-third | - | `skills/dream-screen3-third/` | **第三屏实时执行层（A7→A4→GateC→A5→A6→A9）** |
 | dream-contradiction-theory | A0 | `skills/dream-contradiction-theory/` | 矛盾分析（矛盾论+孙子兵法+战争论） |
 | dream-strategy-research | A1 | `skills/dream-strategy-research/` | 深度调研（Tavily+OKX+链上） |
 | dream-first-principles | A2 | `skills/dream-first-principles/` | 第一性原理（阻力最小+趋势延续） |
@@ -68,7 +69,8 @@
 
 | 文档 | 路径 | 版本 | 说明 |
 |:-----|:-----|:-----|:-----|
-| **工作流规范** | `docs/TRADING_WORKFLOW_SPEC_v1.md` | v1.0 | 三屏策略流程+邮箱体系+自动化任务 |
+| **Claude Code 协作方案** | `docs/CLAUDE_CODE_COLLAB_PLAN.md` | v1.0 | ★ Team A/B 分工+CronCreate+Session归档+代码化路线 |
+| **工作流规范** | `docs/TRADING_WORKFLOW_SPEC_v1.md` | v1.0 | 三屏策略流程+邮箱体系+自动化任务（待审核） |
 | **交易系统设计** | `TRADING_SYSTEM.md` | v2.2 | A0-A9完整设计+三屏执行+马丁策略 |
 | **A系详解** | `A_SERIES_DETAIL.md` | v1.0 | A0-A9各模块职责说明 |
 | **架构设计** | `docs/ARCHITECTURE_DESIGN_v2.0.md` | v2.0 | DreamBuddy系统架构（120KB） |
@@ -95,7 +97,10 @@
 │   ├── dream_strategy_pipeline.py  # 策略流水线
 │   ├── okx_cli.py / okx_unified_toolkit.py  # OKX工具
 │   └── a*_*.py               # A系列脚本
-├── skills/                    # 项目级SKILL（22个）
+├── skills/                    # 项目级SKILL（23个）
+├── sessions/                  # ★ 交易会话归档
+│   ├── README.md              # 命名规范：{YYYYMMDD}-{SYMBOL}-{TRIGGER}/
+│   └── _template/             # 会话目录模板（meta.json + team-a/b/ + gate-c/ + review/）
 ├── data/                      # 数据目录
 │   ├── backtest/              # 回测数据（BTC-USDT-SWAP 1D）
 │   ├── episodes/              # 交易Episode记录（11个）
@@ -103,7 +108,7 @@
 ├── reports/                   # 回测报告
 │   ├── backtest_result_v2.json    # 200U回测结果
 │   └── backtest_v2_10k.json       # 10kU回测结果
-├── docs/                      # 架构与规范文档（10个）
+├── docs/                      # 架构与规范文档（11个）
 ├── automation/                # 自动化脚本
 ├── config/                    # 配置文件
 │   └── strategy_library.yaml  # 策略库（v2.2）
@@ -123,7 +128,7 @@
 | `scripts/a4_validation_executor.py` | 战术验证执行 | v1.0 | A4 |
 | `scripts/okx_cli.py` | OKX CLI封装 | v1.3.4 | 执行层 |
 | `scripts/okx_unified_toolkit.py` | OKX统一工具包 | v1.0 | 执行层 |
-| `scripts/dream_stop_loss_monitor.py` | 止损监控 | v1.0 | A9 |
+| `scripts/dream_stop_loss_monitor.py` | 止损监控（凭证已安全化） | v1.1 | A9 |
 
 ### 3.3 Bridge API端点
 
@@ -141,8 +146,10 @@
 
 | 任务 | ID | 频率 | 说明 |
 |:-----|:---|:-----|:-----|
-| 第一屏-周度方向确定 | `automation-1778908488411` | 每周一 08:00 | 周线方向+策略选择 |
-| 第二屏-日线订单设置 | `automation-1778908528830` | 每日 09:00 | 日线预设+三大预设 |
+| 第一屏-周线分析 | TBD（待 CronCreate 注册） | 每周日 20:00 | 周线方向+策略选择（先于周一开盘） |
+| 第二屏-日线预设 | TBD（待 CronCreate 注册） | 每工作日 07:30 | 日线预设+三大预设价位表 |
+| Team B 状态检查 | TBD（待 CronCreate 注册） | 每工作日 09:00 | 持仓监控/入场执行 |
+| Process D 复盘 | TBD（待 CronCreate 注册） | 每周一 06:00 | A8 复盘+改进提案 |
 | 6-TRADING邮箱扫描器 | `automation-1778908569973` | 每小时 | 扫描A4/A5/A6/A9产物 |
 | 交易工作流监控 | `automation-1778908570394` | 每4h | 监控自动化运行状态 |
 
@@ -220,4 +227,4 @@ OKX_PASSPHRASE
 
 ---
 
-*最后更新: 2026-05-16*
+*最后更新: 2026-05-27*
