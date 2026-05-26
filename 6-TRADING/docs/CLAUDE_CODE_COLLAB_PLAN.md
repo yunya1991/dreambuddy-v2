@@ -4,7 +4,7 @@
 >
 > **更新规则**: 修改此文档 → 告知 Claude "同步记忆" → Claude 读取此文档更新记忆系统。
 >
-> **版本**: v1.0 | 创建日期: 2026-05-26
+> **版本**: v1.1 | 创建日期: 2026-05-26 | 更新: 2026-05-27
 
 ---
 
@@ -156,55 +156,27 @@ sessions/
 
 ## 四、CronCreate 定时任务
 
-| 任务 | Cron | 触发提示词 |
-|------|------|-----------|
-| Screen 1 周线 | `0 20 * * 0` | 见下方模板 |
-| Screen 2 日线 | `30 7 * * 1-5` | 见下方模板 |
-| Team B 检查 | `0 9 * * 1-5` | 见下方模板 |
-| Process D 复盘 | `0 6 * * 1` | 见下方模板 |
+| 任务 | Cron | Job ID | 状态 |
+|------|------|--------|------|
+| Screen 1 周线分析 | `0 20 * * 0` | `b9ce16da` | ✅ 运行中 |
+| Screen 2 日线预设 | `30 7 * * 1-5` | `cd7edd91` | ✅ 运行中 |
+| Team B 状态检查 | `0 9 * * 1-5` | `a30b1027` | ✅ 运行中 |
+| Process D 复盘 | `0 6 * * 1` | `21514de4` | ✅ 运行中 |
 
-### 触发提示词模板
+### 触发提示词
 
-**Screen 1（每周日）**：
-```
-运行 6-TRADING Team A Screen 1 周线分析：
-1. 读取 memory 中 project_trading_session_state 当前状态
-2. 在 6-TRADING/sessions/ 创建 {YYYYMMDD}-BTC-SCREEN1/ 文件夹
-3. 并行启动 3 个子 Agent：A1矛盾分析/A2第一性原理/A3沙盘推演（周线级）
-4. 主 Agent 综合输出 strategy-type.json + weekly-direction.md
-5. 更新 memory 中的 screen1_direction + screen1_valid_until
-```
+> ⚠️ **触发提示词已迁移至独立规范文档，请勿修改此处（会造成版本分裂）**
+>
+> **权威来源**: [TRIGGER_PROMPTS.md](TRIGGER_PROMPTS.md) **v1.2**
+>
+> 当前版本包含：Phase-0 完整数据采集链（P0.1-P0.9）/ IA 偏见注入（A1/A2/A3/GC/A8）/
+> ACH 竞争性假设 Gate C / master-seminar 大师辩论 / dream-archive-center 历史情景 /
+> dream-oneirology 弗洛伊德分析 / dream-data-analysis 量化复盘 / 三级学习闭环
 
-**Screen 2（每工作日）**：
-```
-运行 6-TRADING Team A Screen 2 日线预设：
-1. 读取 memory 中 screen1_direction，验证 valid_until 是否在有效期
-2. 如过期或 null → 先触发 Screen 1
-3. 在 6-TRADING/sessions/ 创建 {YYYYMMDD}-BTC-SCREEN2/ 文件夹
-4. 顺序执行 A1/A2/A3 日线级（基于 Screen 1 方向约束）
-5. 计算马丁阶梯，输出 daily-presets.json + order-plan.md
-6. 更新 memory 中的 screen2_presets
-```
-
-**Team B（每工作日）**：
-```
-运行 6-TRADING Team B Screen 3 状态检查：
-1. 读取 memory 中 project_trading_session_state
-2. 如 status=no_position 且 screen2_presets 存在 → 执行入场流程（A7→A4→GateC→A5）
-3. 如 status=holding → 执行 A6 监控检查 + A9 止盈止损检查
-4. 所有动作写入当前 session 的 team-b/ 目录
-5. 更新 memory 中的 current_position 状态
-```
-
-**Process D（每周一）**：
-```
-运行 6-TRADING Process D 复盘：
-1. 列出上周 6-TRADING/sessions/ 的所有文件夹
-2. 读取每个 session-summary.md
-3. 执行 A8 理论实践验证 SKILL，生成改进提案
-4. 写入最新 session 的 review/a8-reflection.md
-5. 提炼对 Screen 1 参数的调整建议
-```
+**多 Claude Code 协作同步规则**：
+1. 修改触发提示词 → 先更新 `TRIGGER_PROMPTS.md` → 再同步各 Claude Code 本地 memory
+2. Process D D3 输出 `trigger_prompt_patch` 提案 → 人工审核 → 更新 `TRIGGER_PROMPTS.md`
+3. 所有 Claude Code 实例以 `TRIGGER_PROMPTS.md` 版本号为准，本地 memory 版本低时须更新
 
 ---
 
@@ -307,9 +279,16 @@ sessions/
 |---------|------|---------|
 | `project_trading_system_design.md` | 设计决策、分工、代码化路线 | 方案变更时 |
 | `project_trading_session_state.md` | 当前持仓方向、Screen1研判、马丁层级 | 每次 Team A/B 执行后 |
-| `reference_trading_cron_jobs.md` | CronCreate Job ID + 触发提示词 | 创建/删除定时任务时 |
+| `reference_trading_cron_jobs.md` | CronCreate Job ID + 触发提示词（从 TRIGGER_PROMPTS.md 同步） | 创建/删除定时任务时 |
 
-**同步规则**：修改此文档后，告知 Claude "同步记忆" 即可更新上述 3 个记忆文件。
+**远端规范文档**（GitHub，多 Claude Code 协作权威来源）：
+
+| 文档 | 内容 | 关联记忆文件 |
+|------|------|------------|
+| [TRIGGER_PROMPTS.md](TRIGGER_PROMPTS.md) | 4 个 CronCreate 完整触发提示词 v1.2 | `reference_trading_cron_jobs.md` |
+| [SKILL_REGISTRY.md](SKILL_REGISTRY.md) | 24 个 SKILL 注册表 + Mermaid 流程图 v1.2 | `project_trading_system_design.md` |
+
+**同步规则**：修改远端规范文档后，告知 Claude "同步记忆" 即可更新对应本地记忆文件。
 
 ---
 
