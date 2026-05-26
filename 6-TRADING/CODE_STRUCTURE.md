@@ -1,7 +1,7 @@
 # 6-TRADING 代码结构索引 v2.0
 
 > **创建日期**: 2026-05-15
-> **更新日期**: 2026-05-16
+> **更新日期**: 2026-05-27
 > **用途**: 工程代码索引、关键路径速查
 
 ---
@@ -45,9 +45,10 @@
 │   ├── sync_from_44304.sh           # 同步44304
 │   └── sync_frontend.sh             # 同步3-FRONTEND
 │
-├── skills/                    # 项目级SKILL（23个）
+├── skills/                    # 项目级SKILL（24个）
 │   ├── dream-systematic-trading/   # ★ 三屏交易总入口SKILL
 │   ├── dream-screen3-third/         # ★ 第三屏实时执行层（v1.1）
+│   ├── dream-doc-sync-gate/         # ★ 文档同步门禁（PR提交前检查）
 │   ├── dream-contradiction-theory/  # A0
 │   ├── dream-strategy-research/     # A1
 │   ├── dream-first-principles/      # A2
@@ -88,11 +89,12 @@
 │       ├── gate-c/            # Gate C 门禁结果
 │       └── review/            # A8 复盘
 │
-├── docs/                      # 架构与规范文档（11个）
+├── docs/                      # 架构与规范文档（12个）
 │   ├── ARCHITECTURE_DESIGN_v2.0.md       # 架构设计（120KB）
 │   ├── ARCHITECTURE_DIAGRAM_v2.0.svg     # 架构图
 │   ├── CLAUDE_CODE_COLLAB_PLAN.md        # ★ Claude Code 协作方案（v1.0）
-│   ├── TRADING_WORKFLOW_SPEC_v1.md       # 工作流规范（v1.0）
+│   ├── ARTIFACT_STORAGE_GUIDE.md         # ★ 产物存储规范（v1.0，Sessions方案）
+│   ├── TRADING_WORKFLOW_SPEC_v1.md       # 工作流规范（v1.1）
 │   ├── BRIDGE_ARCHITECTURE_v1.0.md       # Bridge架构
 │   ├── A0_A9_SKILL_COVERAGE_v1.0.md     # SKILL覆盖
 │   ├── ARCHITECTURE_REVIEW_v1.0.md       # 架构评审
@@ -141,12 +143,15 @@
 | `~/.workbuddy/6-trading-env.sh` | 环境变量（TAVILY/OKX） |
 | `dream_gateway.db` | 前端SQLite数据库 |
 
-### 自动化路径
+### 产物存储路径
 
 | 路径 | 说明 |
 |:-----|:-----|
-| `~/.workbuddy/skills/boss-secretary/reports/trading/6-trading/` | 6-TRADING邮箱 |
-| `scripts/mailbox_scanner.py` | 邮箱扫描器 |
+| `sessions/ACTIVE_SESSION.json` | ★ 当前活跃会话指针 |
+| `sessions/{YYYYMMDD}-{SYMBOL}-{TRIGGER}/` | 每次交易会话目录 |
+| `sessions/{id}/team-a/screen1/` | 第一屏研究产物 |
+| `sessions/{id}/team-a/screen2/` | 第二屏预设产物 |
+| `sessions/{id}/team-b/` | 执行日志/仓位状态 |
 | `~/.workbuddy/workbuddy.db` | 自动化存储（SQLite） |
 
 ### 外部项目路径
@@ -170,7 +175,9 @@
 | 策略库 | v2.2 | strategy_library.yaml |
 | 前端 | Next.js | 端口3000 |
 | 邮箱扫描器 | v1.0 | 每小时扫描 |
-| 工作流规范 | v1.0 | TRADING_WORKFLOW_SPEC |
+| 工作流规范 | v1.1 | TRADING_WORKFLOW_SPEC（Sessions方案替代旧邮箱） |
+| 产物存储规范 | v1.0 | ARTIFACT_STORAGE_GUIDE（Sessions分类+索引） |
+| dream-doc-sync-gate SKILL | v1.0 | 文档同步门禁（PR前检查） |
 | dream_stop_loss_monitor | v1.1 | 凭证改用 env vars/~/.okx/config.toml |
 | dream-screen3-third SKILL | v1.1 | 第三屏执行层完整定义 |
 | Claude Code 协作方案 | v1.0 | docs/CLAUDE_CODE_COLLAB_PLAN.md |
