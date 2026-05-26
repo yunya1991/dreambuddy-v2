@@ -1,8 +1,21 @@
 #!/usr/bin/env python3
 """
-回测策略实现模块 v7.0
+回测策略实现模块 v8.0
 ======================
 忠实实现 TRADING_WORKFLOW_SPEC_v1.md 设计规范
+
+v9.0 — Level3加满后启用均价止损 (防整链亏损):
+  1. is_martin_complete 时设置 stop_loss_price = avg_entry×0.80 (LONG) / ×1.20 (SHORT)
+  2. check_exit_signals L1-SL 仅在 is_martin_complete 且 stop_loss_price>0 时触发
+  3. 未加满前无固定SL, 仍靠信号反转/回撤出场
+
+v8.0 — 用户马丁经验规则 (个人实战优化):
+  1. 加仓间隔: 每跌 addon_gap_pct%×vol_mult 加一次仓 (复利计算, BTC=8%, SOL/ETH按波动率放大)
+  2. 止盈: 均价+tp_pct%×vol_mult 一次全平 (BTC=4%, SOL/ETH按波动率放大), 无分批
+  3. 加仓门禁: 需 Screen2 信号评分 ≥ addon_min_score (默认50)
+  4. 无固定价格止损 (移除SL触发); 非明确信号不提前出场
+  5. 出场条件: ① TP目标触及 ② Screen1方向明确反转 ③ 20%组合回撤强制全平
+  6. 移除 risk_event 出场 (ATR扩张不再强制平仓)
 
 v7.0 Opt-1B — 动态历史波动率(HV)驱动 Regime 阈值:
   1. _calc_quarterly_vol_mult(): 13周滚动 std / BTC基准(9%/周) → vol_mult
@@ -82,13 +95,13 @@ class StrategyType(Enum):
 
 
 class ExitReason(Enum):
-    TAKE_PROFIT_1 = "take_profit_1"      # 第一档止盈 (平30%)
-    TAKE_PROFIT_2 = "take_profit_2"      # 第二档止盈 (平30%)
-    TAKE_PROFIT_3 = "take_profit_3"      # 第三档止盈 (平40%)
-    STOP_LOSS = "stop_loss"
+    TAKE_PROFIT_1 = "take_profit_1"      # v8.0: 单次全仓止盈 (均价+tp_pct%×vol_mult)
+    TAKE_PROFIT_2 = "take_profit_2"      # 保留兼容 (v8.0不使用)
+    TAKE_PROFIT_3 = "take_profit_3"      # 保留兼容 (v8.0不使用)
+    STOP_LOSS = "stop_loss"              # 保留兼容 (v8.0不触发固定SL)
     SIGNAL_REVERSAL = "signal_reversal"
     DRAWDOWN_LIMIT = "drawdown_limit"
-    RISK_EVENT = "risk_event"
+    RISK_EVENT = "risk_event"            # 保留兼容 (v8.0不触发)
     END_OF_BACKTEST = "end_of_backtest"
     NONE = "none"
 
@@ -106,6 +119,7 @@ class Screen1Output:
     position_limit_pct: float = 0.20    # 总仓位上限: 20%/40%/60%
     regime: str = "CONSOLIDATION"       # 市场形态: STRONG_BULL/WEAK_BULL/CONSOLIDATION/WEAK_BEAR/STRONG_BEAR
     regime_multiplier: float = 0.5      # 仓位乘数: 0.5(震荡) / 0.75(弱趋势) / 1.0(强趋势)
+    vol_mult: float = 1.0               # v8.0: 动态HV乘数, 用于加仓间隔和止盈计算
 
 
 @dataclass
@@ -116,9 +130,8 @@ class Screen2Output:
     signal_score: float
     entry_price: float
     position_pct: float              # 单层仓位比例 (总仓位的1/4)
-    add_on_levels: List[float]       # 3个加仓价位
-    tp_levels: List[float]           # 3个止盈价位 (2x/3x/5x ATR)
-    stop_loss_price: float           # 动态止损价: 加仓阶段=Level3极限价; 马丁完成后=均价×0.80
+    add_on_levels: List[float]       # 3个加仓价位 (复利间隔 addon_gap%×vol_mult)
+    tp_target: float                 # v8.0: 单次全仓止盈目标 (均价+tp_pct%×vol_mult)
     atr: float
     volatility: float
     addon_suppressed: bool = False   # v7.0 Opt-2: RSI超买/ATR扩张时抑制本轮加仓
@@ -126,22 +139,21 @@ class Screen2Output:
 
 @dataclass
 class Position:
-    """当前持仓状态 — 支持分批仓位"""
+    """当前持仓状态"""
     direction: Direction = Direction.WAIT
     entry_price: float = 0.0         # 加权平均入场价
     initial_size_usd: float = 0.0    # 初始入场大小 (用于等额加仓)
     size_usd: float = 0.0            # 当前持仓大小
     level: int = 0                   # 马丁层级 0=初始, 1-3=加仓
     add_on_levels: List[float] = field(default_factory=list)
-    tp_levels: List[float] = field(default_factory=list)  # 三层止盈价位
-    tp_hit: List[bool] = field(default_factory=list)      # 每层是否已触发
-    stop_loss_price: float = 0.0
+    tp_target: float = 0.0           # v8.0: 单次全仓止盈目标 (随均价滚动更新)
+    stop_loss_price: float = 0.0     # v9.0: 均价止损 (仅 Level3加满后启用, 默认0=未激活)
     highest_equity: float = 0.0
     entry_date: str = ""
     signal_strength: SignalStrength = SignalStrength.NONE
     screen1: Optional[Screen1Output] = None
     total_cost: float = 0.0
-    is_martin_complete: bool = False  # Level 3加满标志
+    is_martin_complete: bool = False  # Level 3加满标志 (用于统计)
 
 
 @dataclass
@@ -171,19 +183,12 @@ DEFAULT_STRATEGY_PARAMS = {
     "weak_score_threshold": 50.0,     # 弱多头阈值 (规范: >=50)
     "short_score_threshold": 35.0,    # 空头阈值 (规范: <=35)
 
-    # 第二屏参数
-    "level_spacing_k": 0.5,           # 加仓间隔系数 (波动率 * 0.5, 最小1%)
+    # v8.0 加仓参数: 按固定百分比复利计算间隔, 按 vol_mult 放大
+    "addon_gap_pct": 8.0,             # BTC加仓间隔基准 (每跌8%加仓; SOL/ETH×vol_mult)
+    "addon_min_score": 50.0,          # 加仓最低信号评分门禁 (Screen2 score)
 
-    # 止盈参数 (ATR倍数) — v4.0 收窄: 0.8x/1.5x/2.5x (原 2x/3x/5x)
-    "tp_level_1": 0.8,                # 第一档止盈 ATR倍数 (平50%) ≈ +1.6% @ BTC
-    "tp_level_2": 1.5,                # 第二档止盈 ATR倍数 (平30%) ≈ +3%
-    "tp_level_3": 2.5,                # 第三档止盈 ATR倍数 (平20%) ≈ +5%
-
-    # 止损: 20% 为基准 (加仓阶段=Level3保护; 马丁完成后=均价×0.80)
-    "stop_loss_pct": 20.0,            # 止损百分比基准 (不可优化覆盖)
-
-    # 仓位参数
-    "base_pos_pct": 100.0,            # 基础仓位比例 (用于信号强度缩放)
+    # v8.0 止盈参数: 单次全仓止盈, 按 vol_mult 放大
+    "tp_pct": 4.0,                    # BTC止盈基准 (均价+4%; SOL/ETH×vol_mult)
 }
 
 
@@ -191,15 +196,7 @@ def _apply_opt_params(defaults: dict, overrides: dict = None) -> dict:
     """合并优化参数 (保留默认值, 仅覆盖传入的参数)"""
     if not overrides:
         return defaults
-    merged = {**defaults, **overrides}
-    # 止损固定20%, 不允许优化覆盖
-    merged["stop_loss_pct"] = 20.0
-    return merged
-
-
-# ==================== 分批止盈比例 (规范) ====================
-
-TP_RATIOS = [0.50, 0.30, 0.20]  # 第一档50%, 第二档30%, 第三档20% (规范: 50%→30%→20%)
+    return {**defaults, **overrides}
 
 # v7.0 Opt-1B: 动态 HV 驱动的 Regime 阈值乘数
 # 静态表作为 fallback (数据 <4 周时使用)
@@ -369,6 +366,7 @@ def run_screen1(
             position_limit_pct=0.20,
             regime="CONSOLIDATION",
             regime_multiplier=0.5,
+            vol_mult=1.0,
         )
 
     params = _apply_opt_params(DEFAULT_STRATEGY_PARAMS, opt_params)
@@ -480,6 +478,7 @@ def run_screen1(
         position_limit_pct=position_limit,
         regime=regime,
         regime_multiplier=regime_multiplier,
+        vol_mult=vol_mult,
     )
 
 
@@ -526,20 +525,18 @@ def run_screen2(
     opt_params: dict = None,
 ) -> Screen2Output:
     """
-    第二屏: 日线预设 (对齐规范 1.2)
+    第二屏: 日线预设 (v8.0)
 
-    核心规则:
-    - 止损(D2): 加仓阶段=Level3极限价; 马丁完成后=均价×0.80
-    - 止盈(D1): 三层 50%/30%/20% (2x/3x/5x ATR), 仅Level 3后启用
-    - 加仓间隔: 20日波动率 * 0.5, 最小1%
+    v8.0 规则:
+    - 加仓间隔: addon_gap_pct%×vol_mult 复利计算 (BTC=8%, SOL/ETH按波动率放大)
+    - 止盈: 单次全仓, 均价+tp_pct%×vol_mult (BTC=4%, SOL/ETH按波动率放大)
+    - 无固定止损价 (由 check_exit_signals L2/L4 管理出场)
     - 仓位: 对齐规范的60%/40%/20%总仓位上限
     """
     params = _apply_opt_params(DEFAULT_STRATEGY_PARAMS, opt_params)
-    level_spacing_k = params["level_spacing_k"]
-    tp_level_1 = params["tp_level_1"]
-    tp_level_2 = params["tp_level_2"]
-    tp_level_3 = params["tp_level_3"]
-    stop_loss_pct = params["stop_loss_pct"]  # 固定20%
+    addon_gap_pct = params.get("addon_gap_pct", 8.0)
+    tp_pct = params.get("tp_pct", 4.0)
+    vol_mult = getattr(screen1, "vol_mult", 1.0)
 
     curr = daily_candles[current_idx]
     price = curr["close"]
@@ -603,14 +600,8 @@ def run_screen2(
     # === 仓位计算 (对齐规范) ===
     # 规范: 总仓位上限 = screen1.position_limit_pct (20%/40%/60%)
     # 马丁策略: 4个层级 (初始 + 3次加仓), 每层等额
-    # 单层仓位 = 总仓位上限 / 4
     total_limit = screen1.position_limit_pct
 
-    # 信号强度缩放:
-    #   STRONG (>=70): 使用100%的总仓位上限
-    #   MEDIUM (50-69): 使用70%的总仓位上限
-    #   WEAK (30-49): 使用40%的总仓位上限
-    #   NONE (<30): 使用20%的总仓位上限 (观望也允许开仓)
     strength_mult = {
         SignalStrength.STRONG: 1.0,
         SignalStrength.MEDIUM: 0.7,
@@ -621,46 +612,25 @@ def run_screen2(
     effective_total = total_limit * strength_mult * screen1.regime_multiplier
     single_layer_pct = effective_total / 4.0  # 等额分4层
 
-    # 加仓阶梯 (规范: 20日波动率 * 0.5, 最小1%)
-    add_on_interval = max(volatility * level_spacing_k, 1.0) / 100.0  # 转为小数
+    # v8.0: 加仓间隔 = addon_gap_pct%×vol_mult 复利 (BTC=8%, SOL/ETH按波动率放大)
+    gap = addon_gap_pct / 100.0 * vol_mult
     add_on_levels = []
     if screen1.direction == Direction.LONG:
         add_on_levels = [
-            round(price * (1 - add_on_interval), 2),
-            round(price * (1 - add_on_interval * 2), 2),
-            round(price * (1 - add_on_interval * 3), 2),
+            round(price * (1 - gap) ** 1, 2),
+            round(price * (1 - gap) ** 2, 2),
+            round(price * (1 - gap) ** 3, 2),
         ]
+        tp_target = round(price * (1 + tp_pct / 100.0 * vol_mult), 2)
     elif screen1.direction == Direction.SHORT:
         add_on_levels = [
-            round(price * (1 + add_on_interval), 2),
-            round(price * (1 + add_on_interval * 2), 2),
-            round(price * (1 + add_on_interval * 3), 2),
+            round(price * (1 + gap) ** 1, 2),
+            round(price * (1 + gap) ** 2, 2),
+            round(price * (1 + gap) ** 3, 2),
         ]
-
-    # 止盈: 三层 (规范: 2x/3x/5x ATR, 仅Level 3后启用)
-    atr_pct = atr_val / price if price > 0 else 0.02
-    if screen1.direction == Direction.LONG:
-        tp_levels = [
-            round(price * (1 + atr_pct * tp_level_1), 2),
-            round(price * (1 + atr_pct * tp_level_2), 2),
-            round(price * (1 + atr_pct * tp_level_3), 2),
-        ]
-        # D2: 初始 SL = 入场均价×0.80; 每次加仓后由 recalc_avg_entry 滚动更新
-        sl_price = round(price * (1 - stop_loss_pct / 100.0), 2)
-    elif screen1.direction == Direction.SHORT:
-        tp_levels = [
-            round(price * (1 - atr_pct * tp_level_1), 2),
-            round(price * (1 - atr_pct * tp_level_2), 2),
-            round(price * (1 - atr_pct * tp_level_3), 2),
-        ]
-        sl_price = round(price * (1 + stop_loss_pct / 100.0), 2)
+        tp_target = round(price * (1 - tp_pct / 100.0 * vol_mult), 2)
     else:
-        tp_levels = [
-            round(price * (1 + atr_pct * tp_level_1), 2),
-            round(price * (1 + atr_pct * tp_level_2), 2),
-            round(price * (1 + atr_pct * tp_level_3), 2),
-        ]
-        sl_price = round(price * (1 - stop_loss_pct / 100.0), 2)
+        tp_target = 0.0
 
     # v7.0 Opt-2: RSI+ATR 加仓抑制 (阈值按代币波动率分档)
     sup_cfg = ADDON_SUPPRESS_THRESHOLDS.get(
@@ -683,8 +653,7 @@ def run_screen2(
         entry_price=price,
         position_pct=round(single_layer_pct, 4),
         add_on_levels=add_on_levels,
-        tp_levels=tp_levels,
-        stop_loss_price=sl_price,
+        tp_target=tp_target,
         atr=atr_val,
         volatility=round(volatility, 4),
         addon_suppressed=addon_suppressed,
@@ -702,80 +671,43 @@ def check_exit_signals(
     trade_count: int
 ) -> Tuple[bool, ExitReason, int]:
     """
-    A9 四层离场决策检查 (对齐规范 1.3)
+    v8.0 简化离场决策 (三条件, 非明确信号不出场)
 
-    返回: (should_exit, exit_reason, tp_level_to_close)
-          tp_level_to_close: -1=全平, 0/1/2=关闭对应止盈档位
+    返回: (should_exit, exit_reason, -1)  — v8.0 全部为全仓平仓 (-1)
 
-    L1: 技术止盈止损
-      - 止损(D2): 加仓阶段=Level3极限价; 马丁完成后=均价×0.80 (由recalc_avg_entry更新)
-      - 止盈(D1): 仅Level 3加满后启用, 分三层 (50%/30%/20%)
-    L2: 信号反转 (连续2根K线确认)
-    L3: 风险事件 (单日ATR超正常值3倍)
-    L4: 最大回撤约束 (20%强制全平)
+    L1a: TP目标触及 (均价+tp_pct%×vol_mult) → 全平
+    L1b: 均价止损 (仅 Level3加满后; avg×0.80/×1.20) → 全平
+    L2:  Screen1 方向明确反转 (LONG→SHORT 或 SHORT→LONG)
+    L4:  最大回撤约束 (20%强制全平)
+
+    已移除: L1-固定SL(未加满时无SL), L1c(移动止盈), L3(风险事件/ATR扩张)
     """
     if position.direction == Direction.WAIT:
         return False, ExitReason.NONE, -1
 
-    price = daily_candle["close"]
-    low = daily_candle["low"]
     high = daily_candle["high"]
+    low = daily_candle["low"]
 
-    # --- L1: 技术止损 (无条件触发: 加仓阶段=Level3极限价; 马丁完成后=均价×0.80) ---
-    if position.direction == Direction.LONG:
-        if low <= position.stop_loss_price:
-            return True, ExitReason.STOP_LOSS, -1  # 全平
-    elif position.direction == Direction.SHORT:
-        if high >= position.stop_loss_price:
-            return True, ExitReason.STOP_LOSS, -1  # 全平
+    # --- L1a: 单次全仓止盈 (tp_target 触发) ---
+    if position.tp_target > 0:
+        if position.direction == Direction.LONG and high >= position.tp_target:
+            return True, ExitReason.TAKE_PROFIT_1, -1
+        elif position.direction == Direction.SHORT and low <= position.tp_target:
+            return True, ExitReason.TAKE_PROFIT_1, -1
 
-    # --- L1: 技术止盈 (仅Level 3加满后启用, 分三层) ---
-    if position.is_martin_complete and position.tp_levels:
-        for tp_idx in range(len(position.tp_levels)):
-            if position.tp_hit[tp_idx]:
-                continue  # 已触发, 跳过
-            tp_price = position.tp_levels[tp_idx]
-            triggered = False
-            if position.direction == Direction.LONG and high >= tp_price:
-                triggered = True
-            elif position.direction == Direction.SHORT and low <= tp_price:
-                triggered = True
+    # --- L1b: 均价止损 (v9.0: 仅 Level3加满后激活, stop_loss_price=avg×0.80/×1.20) ---
+    if position.is_martin_complete and position.stop_loss_price > 0:
+        if position.direction == Direction.LONG and low <= position.stop_loss_price:
+            return True, ExitReason.STOP_LOSS, -1
+        elif position.direction == Direction.SHORT and high >= position.stop_loss_price:
+            return True, ExitReason.STOP_LOSS, -1
 
-            if triggered:
-                reason = [ExitReason.TAKE_PROFIT_1, ExitReason.TAKE_PROFIT_2, ExitReason.TAKE_PROFIT_3][tp_idx]
-                return True, reason, tp_idx
-
-    # --- L1b: 移动止盈 (Level 3加满后, 盈利超10%触发保护) ---
-    if position.is_martin_complete:
-        if position.direction == Direction.LONG:
-            unrealized_pct = (price - position.entry_price) / position.entry_price
-            if unrealized_pct > 0.10:
-                # 所有TP已触发, 检查是否回撤到2%利润保护线
-                all_tp_hit = all(position.tp_hit) if position.tp_hit else False
-                if all_tp_hit and low <= position.entry_price * 1.02:
-                    return True, ExitReason.TAKE_PROFIT_3, 2
-        elif position.direction == Direction.SHORT:
-            unrealized_pct = (position.entry_price - price) / position.entry_price
-            if unrealized_pct > 0.10:
-                all_tp_hit = all(position.tp_hit) if position.tp_hit else False
-                if all_tp_hit and high >= position.entry_price * 0.98:
-                    return True, ExitReason.TAKE_PROFIT_3, 2
-
-    # --- L2: 信号反转 (需要极端偏离才触发) ---
+    # --- L2: Screen1 方向明确反转 ---
     if position.screen1 and screen1.direction != Direction.WAIT:
-        if (position.direction == Direction.LONG and screen1.direction == Direction.SHORT
-                and screen1.weekly_score <= 25):
+        if position.direction == Direction.LONG and screen1.direction == Direction.SHORT:
             return True, ExitReason.SIGNAL_REVERSAL, -1
-        if (position.direction == Direction.SHORT and screen1.direction == Direction.LONG
-                and screen1.weekly_score >= 75):
+        if position.direction == Direction.SHORT and screen1.direction == Direction.LONG:
             return True, ExitReason.SIGNAL_REVERSAL, -1
-
-    # --- L3: 风险事件 (单日波幅超10%) ---
-    atr = daily_candle.get("atr") or 0
-    if atr > 0 and position.entry_price > 0:
-        atr_pct = atr / position.entry_price
-        if atr_pct > 0.10:
-            return True, ExitReason.RISK_EVENT, -1
 
     # --- L4: 最大回撤约束 (20%强制全平) ---
     if peak_equity > 0:
@@ -793,16 +725,22 @@ def calc_martin_add_on(
     candle: Dict,
     available_capital: float,
     equity: float,
-    taker_fee: float = 0.0005
+    taker_fee: float = 0.0005,
+    min_score: float = 50.0,
+    signal_score: float = 50.0,
 ) -> Optional[Tuple[float, float]]:
     """
-    检查是否触发马丁加仓 (对齐规范: 等额加仓)
+    检查是否触发马丁加仓 (v8.0: 需信号评分门禁 + 等额加仓)
 
     返回: (add_price, add_size_usd) 或 None
     """
     if position.direction == Direction.WAIT:
         return None
     if position.level >= 3:  # 最多3次加仓
+        return None
+
+    # v8.0: 信号强度门禁 (加仓需 Screen2 评分达标)
+    if signal_score < min_score:
         return None
 
     # 检查当前价格是否触发加仓位
@@ -845,28 +783,16 @@ def calc_martin_add_on(
     return (target_price, round(add_size, 2))
 
 
-def calc_partial_close(
-    position: Position,
-    tp_level: int
-) -> float:
-    """
-    计算分批止盈的平仓数量 (规范: 50%/30%/20%)
-
-    tp_level: 0=第一档, 1=第二档, 2=第三档
-    返回: 要平仓的USD数量
-    """
-    if tp_level < 0 or tp_level >= len(TP_RATIOS):
-        return position.size_usd  # 全平
-    return position.size_usd * TP_RATIOS[tp_level]
-
 
 def recalc_avg_entry(
     position: Position,
     add_price: float,
     add_size: float,
-    taker_fee: float = 0.0005
+    taker_fee: float = 0.0005,
+    vol_mult: float = 1.0,
+    tp_pct: float = 4.0,
 ):
-    """重新计算平均入场价和总成本 (加仓用)"""
+    """重新计算平均入场价和止盈目标 (v8.0: TP随均价滚动更新, 无固定SL)"""
     old_total = position.entry_price * position.size_usd
     new_total = add_price * add_size
     total_size = position.size_usd + add_size
@@ -877,12 +803,18 @@ def recalc_avg_entry(
     position.total_cost += add_size * taker_fee
     position.level += 1
 
-    # D2: 每次加仓后，止损滚动更新为新均价×0.80 (动态均价止损)
+    # v8.0: TP目标 = 新均价 × (1 + tp_pct%×vol_mult)
+    tp_gap = tp_pct / 100.0 * vol_mult
     if position.direction == Direction.LONG:
-        position.stop_loss_price = round(position.entry_price * 0.80, 2)
+        position.tp_target = round(position.entry_price * (1 + tp_gap), 2)
     elif position.direction == Direction.SHORT:
-        position.stop_loss_price = round(position.entry_price * 1.20, 2)
+        position.tp_target = round(position.entry_price * (1 - tp_gap), 2)
 
-    # 检查是否完成全部加仓 (Level 3 = 初始 + 3次加仓)
+    # 马丁完成统计 (Level 3 = 初始 + 3次加仓)
     if position.level >= 3:
         position.is_martin_complete = True
+        # v9.0: Level3加满后激活均价止损 (防整链全亏)
+        if position.direction == Direction.LONG:
+            position.stop_loss_price = round(position.entry_price * 0.80, 2)
+        elif position.direction == Direction.SHORT:
+            position.stop_loss_price = round(position.entry_price * 1.20, 2)
