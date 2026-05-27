@@ -1,12 +1,13 @@
 # 6-TRADING 触发提示词规范 v1.3
 
-> **版本**: v1.4 | **更新日期**: 2026-05-27
+> **版本**: v1.6 | **更新日期**: 2026-05-27
 > **维护说明**: 本文档是 6-TRADING 4 个 CronCreate 定时任务的**权威提示词来源**。
 > **多 Claude Code 协作**: 每次修改触发提示词后，必须同步更新本文档，确保所有 Claude Code 实例使用相同版本。
 > **同步关系**: 本文档 → Claude Code 本地 `memory/reference_trading_cron_jobs.md`（单向从此同步）
 > **v1.3 变更**: 新增 Governance 层（G2 合规/G3 自动修复/G4 升级路由/CC 成本守卫）；Process D 新增 Step 0C/1.5b/1.5c/4.5/4.6；完整提案生命周期闭环（含 R0-R3 分级落地矩阵）
 > **v1.4 变更**: 正式绑定 tavily SKILL（4-GENERIC）为 Phase-0 搜索原语；标注 basic/advanced/news/general 模式；新增权威域名白名单注释
 > **v1.5 变更**: 压力测试修复（10个缺口）：screen1_session_id 写入记忆、Screen2 漂移恢复机制、sleepwalk 提前触发机制、A9 EXIT 调用 B9+C4、PARALLEL_INCOMPLETE C4、A8/OE 并行 race condition、martingale 参数分隔标记
+> **v1.6 变更**: Screen 2 Phase-1 A1/A2/A3 正式由 [qwen-analyst] 驱动（节省 ~70% Claude Token）；新增 screen2_qwen.py 调用规范；降级回退至 Claude 内联分析
 
 ---
 
@@ -111,9 +112,14 @@ P0.2: 与记忆中 screen1_btc_price_basis 比对
   - 偏差 < 5%：正常执行
 P0.3: 验证 Screen1 有效期（valid_until 字段），已过期则先触发 Screen1
 
-[Phase-1 日线分析]
+[Phase-1 日线分析 — A1/A2/A3 由 qwen-analyst 驱动]
 1. 创建 sessions/{YYYYMMDD}-BTC-SCREEN2/ 文件夹
-2. 并行执行 A1(日线矛盾)/A2(日线第一性原理)/A3(日线沙盘)，注入 Phase-0 数据
+2. [qwen-analyst] 调用 C:/tmp/screen2_qwen.py 顺序执行 A1→A2→A3（托管给千问 API，节省 ~70% Claude Token）：
+   - A1 日线矛盾分析 → qwen-plus（输出: primary_contradiction / bull_evidence / bear_evidence / contradiction_score / bias_flags）
+   - A2 第一性原理   → qwen-plus（输出: trend_confidence / screen1_alignment_pct / reasoning_chain / invalidation_threshold）
+   - A3 三情景沙盘   → qwen-max（输出: S1/S2/S3 概率+TP/SL/仓位 / red_team_flag / phase7_contingency）
+   Claude Code 职责：Phase-0 Tavily 搜索（P0.1-P0.3）+ 调用 screen2_qwen.py + 写入 GitHub
+   ⛔ qwen-analyst 失败（API 超时/返回非 JSON）→ 降级：Claude Code 内联完成 A1/A2/A3 分析（与 Screen 1 相同标准）
 3. 计算马丁阶梯参数（auto-repair G3 可自动更新下方标记段内的数值）：
 <!-- MARTINGALE_PARAMS_START -->
    - S1基准: L0仓位=30%, TP=+3%, SL=-4%, 间距=1.5%
@@ -338,6 +344,7 @@ Step 6 [记忆更新]:
 | v1.3 | 2026-05-27 | 集成 6 个 3-SUPPORT SKILL：CC Tavily 预算守卫 / AR 账户隔离 / Process D Step 0C/1.5b/1.5c/4.5/4.6 完整提案闭环 |
 | v1.4 | 2026-05-27 | 正式绑定 tavily 4-GENERIC SKILL 为 Phase-0 搜索原语；标注 basic/advanced/news/general 模式和权威域名白名单 |
 | v1.5 | 2026-05-27 | 压力测试修复：screen1_session_id/blocked_reason 写入记忆；Screen2 漂移内联恢复；sleepwalk 内联 ProcessD；A9 EXIT B9+C4；PARALLEL_INCOMPLETE B9+C4；Step 1.5d A8+OE merge；martingale 参数分隔标记 |
+| v1.6 | 2026-05-27 | Screen 2 Phase-1 A1/A2/A3 由 [qwen-analyst] 驱动（C:/tmp/screen2_qwen.py + qwen_analyst.py）；降级回退机制；节省 ~70% Claude Token |
 
 ---
 
