@@ -168,3 +168,37 @@
 ---
 
 *最后更新: 2026-05-26 v1.1 | 修复 G4 (a7_gate_score 来源) + G5 (consecutive_skip_count 跨session计算)*
+
+---
+
+## 九、memory_db.index_episode() 集成（6-TRADING 本地记忆层）
+
+### 触发时机
+
+screen3_runner.py Phase-2 写 GitHub 成功后，**立即** 调用 `memory_db.index_episode(episode_dict)`，将本次 episode 写入本地 SQLite FTS5 记忆库。
+
+### 实现位置
+
+`C:/tmp/screen3_runner.py` — Phase-M 写回段：
+
+```python
+if mdb and not args.dry_run:
+    try:
+        is_new = mdb.index_episode(episode)
+        print(f'[Phase-M] memory_db.index_episode() {"new" if is_new else "updated"}',
+              file=sys.stderr)
+    except Exception as e:
+        print(f'[Phase-M] index_episode 失败（不影响主流程）: {e}', file=sys.stderr)
+```
+
+### 下游消费者
+
+| 消费者 | 调用方式 |
+|-------|---------|
+| screen2_runner.py Phase-M | `mdb.prefetch_context(btc_price, direction)` → 历史注入 A1/A2 |
+| Process D Step 3 D2 | `mdb.query_stats(filters)` → win_rate / skip_rate / avg_pnl |
+| import_history.py | 历史数据批量回填（冷启动） |
+
+### 失败策略
+
+memory_db 不可用时**降级跳过**，不影响主流程。episode.json 已在 GitHub，重跑 `import_history.py` 可补录。
